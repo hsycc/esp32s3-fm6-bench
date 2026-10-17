@@ -12,10 +12,10 @@
 #include "sdkconfig.h"
 
 #ifdef FM6_QEMU_CI
-#define BENCH_WARMUP_BLOCKS 32u
-#define BENCH_SAMPLES 128u
-#define SCAN_WARMUP_BLOCKS 32u
-#define SCAN_SAMPLES 16u
+#define BENCH_WARMUP_BLOCKS 64u
+#define BENCH_SAMPLES 512u
+#define SCAN_WARMUP_BLOCKS 64u
+#define SCAN_SAMPLES 64u
 #else
 #define BENCH_WARMUP_BLOCKS 512u
 #define BENCH_SAMPLES 4096u
@@ -44,10 +44,12 @@ static uint32_t deadline_cycles(void)
                       FM6_BENCH_SAMPLE_RATE);
 }
 
+#ifndef FM6_QEMU_CI
 static uint32_t us_to_cycles(uint32_t us)
 {
     return us * cpu_mhz();
 }
+#endif
 
 static double cycles_to_us(uint32_t cycles)
 {
@@ -237,8 +239,13 @@ void fm6_bench_run(void)
     uint32_t worst_mean = 0;
     for (unsigned alg = 0; alg < 32u; ++alg) {
         const uint32_t mean = scan_algorithm(12u, alg);
-        printf("  alg=%2u mean=%6" PRIu32 " cycles (%7.2f us) sounded=%u\n",
-               alg + 1u, mean, cycles_to_us(mean), fm6_port_last_sounded());
+        const uint32_t signature = fm6_port_checksum();
+        printf("  alg=%2u mean=%6" PRIu32 " cycles (%7.2f us) sounded=%u checksum=0x%08" PRIx32 "\n",
+               alg + 1u, mean, cycles_to_us(mean), fm6_port_last_sounded(), signature);
+        if (signature == 0u) {
+            ++s_functional_failures;
+            printf("FUNCTIONAL_FAIL phase=algorithm_signature alg=%u value=0\n", alg + 1u);
+        }
         if (mean > worst_mean) {
             worst_mean = mean;
             worst_alg = alg;
@@ -269,7 +276,14 @@ void fm6_bench_run(void)
     }
     printf("checksum=0x%08" PRIx32 "\n", checksum);
 #ifdef FM6_QEMU_CI
-    printf("QEMU_VALIDATION: %s failures=%u\n",
+    printf("QEMU_RESULT voices=12 alg=%u mean_cycles=%" PRIu32
+           " p95_cycles=%" PRIu32 " p99_cycles=%" PRIu32
+           " max_cycles=%" PRIu32 " deadline_misses=%" PRIu32
+           " checksum=0x%08" PRIx32 "\n",
+           worst_alg + 1u,
+           stats12.mean, stats12.p95, stats12.p99, stats12.max,
+           stats12.deadline_misses, checksum);
+    printf("QEMU_VALIDATION: %s failures=%u algorithms=32 voices=6/8/10/12\n",
            s_functional_failures == 0 ? "PASS" : "FAIL",
            s_functional_failures);
 #else
