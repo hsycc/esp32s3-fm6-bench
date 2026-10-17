@@ -3,6 +3,12 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#ifdef FM6_QEMU_CI
+#define FM6_BENCH_CORE 0
+#else
+#define FM6_BENCH_CORE 1
+#endif
+
 static void bench_task(void *arg)
 {
     (void)arg;
@@ -19,5 +25,5 @@ void app_main(void)
         NULL,
         20,
         NULL,
-        0);
+        FM6_BENCH_CORE);
 }
