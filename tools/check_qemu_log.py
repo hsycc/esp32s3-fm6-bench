@@ -29,6 +29,13 @@ SOAK_RE = re.compile(
 FEATURE_SUMMARY_RE = re.compile(
     r"QEMU_FEATURE_MATRIX: (?P<status>PASS|FAIL) tests=(?P<tests>\d+) failures=(?P<failures>\d+)"
 )
+EVENT_RE = re.compile(
+    r"QEMU_EVENT_STRESS: (?P<status>PASS|FAIL) blocks=(?P<blocks>\d+) passes=(?P<passes>\d+) "
+    r"interval=(?P<interval>\d+) note_on=(?P<note_on>\d+) note_off=(?P<note_off>\d+) "
+    r"retrigger=(?P<retrigger>\d+) drain_blocks=(?P<drain>\d+) final_sounded=(?P<final>\d+) "
+    r"checksum=(?P<checksum>0x[0-9a-fA-F]+) energy=(?P<energy>\d+) "
+    r"api_failures=(?P<api_failures>\d+) deterministic=(?P<deterministic>\d+)"
+)
 
 EXPECTED_ALGORITHMS = set(range(1, 33))
 EXPECTED_VOICES = {6, 8, 10, 12}
@@ -71,9 +78,11 @@ def main() -> int:
     bad_markers = [
         "FUNCTIONAL_FAIL",
         "FEATURE_SOAK_FAIL",
+        "EVENT_STRESS_DETAIL",
         "status=FAIL",
         "QEMU_SOAK: FAIL",
         "QEMU_FEATURE_MATRIX: FAIL",
+        "QEMU_EVENT_STRESS: FAIL",
         "Guru Meditation",
         "assert failed",
         "panic'ed",
@@ -157,6 +166,28 @@ def main() -> int:
             f"unexpected feature summary tests={feature_summary.group('tests')} failures={feature_summary.group('failures')}"
         )
 
+    event = EVENT_RE.search(text)
+    if not event:
+        return fail("missing QEMU_EVENT_STRESS result")
+    if event.group("status") != "PASS":
+        return fail("QEMU event stress failed")
+    if int(event.group("blocks")) != 4096 or int(event.group("passes")) != 2:
+        return fail(
+            f"unexpected event stress dimensions blocks={event.group('blocks')} passes={event.group('passes')}"
+        )
+    if int(event.group("note_on")) == 0 or int(event.group("note_off")) == 0:
+        return fail("event stress did not exercise both note-on and note-off")
+    if int(event.group("retrigger")) == 0:
+        return fail("event stress did not exercise active-voice retrigger")
+    if int(event.group("final")) != 0:
+        return fail(f"event stress did not release to silence, final_sounded={event.group('final')}")
+    if int(event.group("api_failures")) != 0:
+        return fail(f"event stress API failures={event.group('api_failures')}")
+    if int(event.group("deterministic")) != 1:
+        return fail("event stress was not deterministic across two passes")
+    if int(event.group("checksum"), 16) == 0 or int(event.group("energy")) == 0:
+        return fail("event stress produced no observable audio activity")
+
     voices = {}
     for m in VOICE_RE.finditer(text):
         v = int(m.group("voices"))
@@ -183,7 +214,8 @@ def main() -> int:
     print("QEMU_LOG_CHECK: PASS")
     print("  algorithms : 32/32, each sounded=12, non-zero signature")
     print("  determinism: 32/32 signatures reproduced exactly")
-    print("  features   : 11 directed DX7 checks + deterministic 64-case soak x2")
+    print("  features   : 11 directed DX7 checks + deterministic 64-case patch soak x2")
+    print("  events     : 4096-block note-on/off/retrigger stress x2, drains to silence")
     print("  voice sweep: 6/8/10/12")
     print(
         "  regression : alg={alg} mean={mean} p95={p95} p99={p99} max={max} checksum={checksum}".format(
