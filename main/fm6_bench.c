@@ -113,8 +113,10 @@ static void print_stats(unsigned voices, unsigned algorithm, const bench_stats_t
 void fm6_bench_run(void)
 {
     printf("\n=== ESP32-S3 FM6 benchmark ===\n");
-    printf("CPU=%u MHz, sample_rate=%u Hz, block=%u frames\n",
-           cpu_mhz(), FM6_BENCH_SAMPLE_RATE, FM6_BENCH_BLOCK_FRAMES);
+    printf("CPU=%" PRIu32 " MHz, sample_rate=%" PRIu32 " Hz, block=%" PRIu32 " frames\n",
+           cpu_mhz(),
+           (uint32_t)FM6_BENCH_SAMPLE_RATE,
+           (uint32_t)FM6_BENCH_BLOCK_FRAMES);
     printf("deadline=%" PRIu32 " cycles = %.2f us\n",
            deadline_cycles(), cycles_to_us(deadline_cycles()));
     printf("upstream Felucca revision=%s\n", fm6_port_upstream_revision());
