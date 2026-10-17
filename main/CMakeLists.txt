@@ -7,6 +7,7 @@ idf_component_register(
         "fm6_event_stress.c"
         "dx7_patch_tests.c"
         "dx7_import_tests.c"
+        "dx7_layout_tests.c"
     INCLUDE_DIRS "."
     REQUIRES fm6_port dx7_patch esp_hw_support
 )
