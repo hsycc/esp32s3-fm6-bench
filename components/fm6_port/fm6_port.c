@@ -239,6 +239,30 @@ void fm6_port_key_all(bool down)
     }
 }
 
+bool fm6_port_note_on(unsigned voice_index, uint8_t note, uint8_t velocity)
+{
+    if (voice_index >= s_prepared_voices) {
+        return false;
+    }
+
+    note = clamp_note(note);
+    velocity = clamp_u8(velocity, 127u);
+    fm6_note_init(&s_voice[voice_index], s_patch, note, velocity, 1);
+    s_note_logfreq[voice_index] = fm6_note_logfreq((int32_t)note * 16, 0);
+    fm6_lfo_key(&s_lfo);
+    return true;
+}
+
+bool fm6_port_note_off(unsigned voice_index)
+{
+    if (voice_index >= s_prepared_voices) {
+        return false;
+    }
+
+    fm6_note_key(&s_voice[voice_index], s_patch, 0);
+    return true;
+}
+
 unsigned fm6_port_last_sounded(void)
 {
     return s_last_sounded;
@@ -287,6 +311,20 @@ void fm6_port_render_block(unsigned voice_count, unsigned algorithm, int32_t *mi
 void fm6_port_key_all(bool down)
 {
     (void)down;
+}
+
+bool fm6_port_note_on(unsigned voice_index, uint8_t note, uint8_t velocity)
+{
+    (void)voice_index;
+    (void)note;
+    (void)velocity;
+    return false;
+}
+
+bool fm6_port_note_off(unsigned voice_index)
+{
+    (void)voice_index;
+    return false;
 }
 
 unsigned fm6_port_last_sounded(void)
