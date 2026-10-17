@@ -12,4 +12,5 @@ const char *fm6_port_upstream_revision(void);
 
 void fm6_port_prepare(unsigned voice_count, unsigned algorithm);
 void fm6_port_render_block(unsigned voice_count, unsigned algorithm, int32_t *mix_out);
+unsigned fm6_port_last_sounded(void);
 uint32_t fm6_port_checksum(void);
