@@ -243,10 +243,12 @@ typedef struct {
     uint32_t checksum;
     uint64_t energy;
     unsigned sounded;
+    bool prepared;
 } render_result_t;
 
 typedef struct {
     uint32_t aggregate;
+    unsigned prepared;
     unsigned active;
     unsigned failures;
     render_result_t voices[DX7_BANK_VOICES];
@@ -275,6 +277,7 @@ static render_result_t render_imported(const uint8_t voice[DX7_VCED_SIZE])
         .checksum = fm6_port_checksum(),
         .energy = fm6_port_abs_energy(),
         .sounded = peak_sounded,
+        .prepared = true,
     };
     return result;
 }
@@ -292,10 +295,13 @@ static bank_render_result_t render_bank_input(const uint8_t *input, size_t input
 
         result.voices[i] = render_imported(voice);
         const render_result_t *r = &result.voices[i];
-        if (r->checksum == 0u || r->energy == 0u || r->sounded != 12u) {
+        if (!r->prepared) {
             ++result.failures;
         } else {
-            ++result.active;
+            ++result.prepared;
+            if (r->energy != 0u || r->sounded != 0u) {
+                ++result.active;
+            }
         }
 
         result.aggregate ^= r->checksum;
@@ -306,17 +312,36 @@ static bank_render_result_t render_bank_input(const uint8_t *input, size_t input
         result.aggregate *= 16777619u;
         result.aggregate ^= r->sounded;
         result.aggregate *= 16777619u;
+        result.aggregate ^= r->prepared ? 1u : 0u;
+        result.aggregate *= 16777619u;
     }
 
     return result;
 }
 
+static bool render_results_equal(const render_result_t *a, const render_result_t *b)
+{
+    return a->checksum == b->checksum &&
+           a->energy == b->energy &&
+           a->sounded == b->sounded &&
+           a->prepared == b->prepared;
+}
+
 static bool bank_results_equal(const bank_render_result_t *a, const bank_render_result_t *b)
 {
-    if (a->aggregate != b->aggregate || a->active != b->active || a->failures != b->failures) {
+    if (a->aggregate != b->aggregate ||
+        a->prepared != b->prepared ||
+        a->active != b->active ||
+        a->failures != b->failures) {
         return false;
     }
-    return memcmp(a->voices, b->voices, sizeof(a->voices)) == 0;
+
+    for (unsigned i = 0; i < DX7_BANK_VOICES; ++i) {
+        if (!render_results_equal(&a->voices[i], &b->voices[i])) {
+            return false;
+        }
+    }
+    return true;
 }
 
 static void test_full_bank_render(void)
@@ -335,20 +360,26 @@ static void test_full_bank_render(void)
     const bank_render_result_t sysex_b = built ? render_bank_input(sysex, sizeof(sysex)) : (bank_render_result_t){0};
     const bank_render_result_t raw = render_bank_input(bank, sizeof(bank));
 
-    const bool all_active = built && sysex_a.failures == 0u && sysex_a.active == DX7_BANK_VOICES;
-    const bool deterministic = all_active && bank_results_equal(&sysex_a, &sysex_b);
-    const bool formats_equal = all_active && raw.failures == 0u &&
-                               raw.active == DX7_BANK_VOICES &&
+    /* A valid DX7 patch is allowed to be silent. The bank gate verifies that every
+     * patch can be decoded, prepared and rendered; active is diagnostic only. */
+    const bool all_rendered = built &&
+                              sysex_a.failures == 0u &&
+                              sysex_a.prepared == DX7_BANK_VOICES;
+    const bool deterministic = all_rendered && bank_results_equal(&sysex_a, &sysex_b);
+    const bool formats_equal = all_rendered &&
+                               raw.failures == 0u &&
+                               raw.prepared == DX7_BANK_VOICES &&
                                bank_results_equal(&sysex_a, &raw);
 
-    check("bank_all_voices_render", all_active);
+    check("bank_all_voices_render", all_rendered);
     check("bank_render_deterministic", deterministic);
     check("raw_bank_sysex_render_equivalence", formats_equal);
 
-    printf("QEMU_DX7_BANK_RENDER: %s voices=%u active=%u passes=2 aggregate=0x%08" PRIx32
+    printf("QEMU_DX7_BANK_RENDER: %s voices=%u prepared=%u active=%u passes=2 aggregate=0x%08" PRIx32
            " raw_aggregate=0x%08" PRIx32 " failures=%u\n",
-           (all_active && deterministic && formats_equal) ? "PASS" : "FAIL",
+           (all_rendered && deterministic && formats_equal) ? "PASS" : "FAIL",
            (unsigned)DX7_BANK_VOICES,
+           sysex_a.prepared,
            sysex_a.active,
            sysex_a.aggregate,
            raw.aggregate,
@@ -375,10 +406,9 @@ static void test_imported_render(void)
     const render_result_t c = render_imported(from_vmem);
     const render_result_t d = render_imported(from_sysex);
 
-    const bool active = a.checksum != 0u && a.energy != 0u && a.sounded == 12u;
-    const bool deterministic = a.checksum == b.checksum && a.energy == b.energy && a.sounded == b.sounded;
-    const bool formats_equal = a.checksum == c.checksum && a.checksum == d.checksum &&
-                               a.energy == c.energy && a.energy == d.energy;
+    const bool active = a.prepared && a.checksum != 0u && a.energy != 0u && a.sounded == 12u;
+    const bool deterministic = render_results_equal(&a, &b);
+    const bool formats_equal = render_results_equal(&a, &c) && render_results_equal(&a, &d);
 
     check("imported_voice_renders_12_voices", active);
     check("imported_voice_render_deterministic", deterministic);
@@ -388,7 +418,7 @@ static void test_imported_render(void)
     transposed[DX7_VCED_TRANSPOSE_OFFSET] = 36u;
     const render_result_t t = render_imported(transposed);
     check("imported_transpose_changes_audio",
-          t.checksum != 0u && t.energy != 0u && t.checksum != a.checksum);
+          t.prepared && t.checksum != 0u && t.energy != 0u && t.checksum != a.checksum);
 
     printf("DX7_PATCH_RENDER checksum=0x%08" PRIx32 " energy=%" PRIu64
            " sounded=%u transpose_checksum=0x%08" PRIx32 "\n",
