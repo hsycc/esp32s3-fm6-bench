@@ -7,6 +7,7 @@
 #include "bench_stats.h"
 #include "fm6_port.h"
 #ifdef FM6_QEMU_CI
+#include "fm6_event_stress.h"
 #include "fm6_feature_tests.h"
 #endif
 #include "esp_cpu.h"
@@ -232,7 +233,7 @@ void fm6_bench_run(void)
     start_core0_stress_task();
 #endif
 
-    printf("\n[1/3] scanning all 32 algorithms at 12 voices...\n");
+    printf("\n[1/4] scanning all 32 algorithms at 12 voices...\n");
     unsigned worst_alg = 0;
     uint32_t worst_mean = 0;
 #ifdef FM6_QEMU_CI
@@ -286,11 +287,14 @@ void fm6_bench_run(void)
            determinism_failures == 0u ? "PASS" : "FAIL",
            determinism_failures);
 
-    printf("\n[2/3] DX7 feature matrix and deterministic soak...\n");
+    printf("\n[2/4] DX7 feature matrix and deterministic patch soak...\n");
     s_functional_failures += fm6_feature_tests_run();
+
+    printf("\n[3/4] deterministic note-on/note-off/retrigger event stress...\n");
+    s_functional_failures += fm6_event_stress_run();
 #endif
 
-    printf("\n[3/3] full percentile runs using worst scanned algorithm...\n");
+    printf("\n[4/4] full percentile runs using worst scanned algorithm...\n");
     static const unsigned voice_counts[] = {6u, 8u, 10u, 12u};
     bench_stats_t stats12 = {0};
     for (unsigned i = 0; i < sizeof(voice_counts) / sizeof(voice_counts[0]); ++i) {
@@ -319,7 +323,7 @@ void fm6_bench_run(void)
            worst_alg + 1u,
            stats12.mean, stats12.p95, stats12.p99, stats12.max,
            stats12.deadline_misses, checksum);
-    printf("QEMU_VALIDATION: %s failures=%u algorithms=32 features=12 voices=6/8/10/12\n",
+    printf("QEMU_VALIDATION: %s failures=%u algorithms=32 features=12 event_blocks=4096 voices=6/8/10/12\n",
            s_functional_failures == 0 ? "PASS" : "FAIL",
            s_functional_failures);
 #else
