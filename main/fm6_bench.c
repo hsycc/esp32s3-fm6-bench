@@ -11,13 +11,21 @@
 #include "freertos/task.h"
 #include "sdkconfig.h"
 
+#ifdef FM6_QEMU_CI
+#define BENCH_WARMUP_BLOCKS 32u
+#define BENCH_SAMPLES 128u
+#define SCAN_WARMUP_BLOCKS 8u
+#define SCAN_SAMPLES 16u
+#else
 #define BENCH_WARMUP_BLOCKS 512u
 #define BENCH_SAMPLES 4096u
 #define SCAN_WARMUP_BLOCKS 128u
 #define SCAN_SAMPLES 512u
+#endif
 
 static uint32_t s_samples[BENCH_SAMPLES];
 static int32_t s_mix[FM6_BENCH_BLOCK_FRAMES];
+static unsigned s_functional_failures;
 
 static uint32_t cpu_mhz(void)
 {
@@ -36,11 +44,24 @@ static double cycles_to_us(uint32_t cycles)
     return (double)cycles / (double)cpu_mhz();
 }
 
+static void verify_sounded(unsigned voices, unsigned algorithm, const char *phase)
+{
+    const unsigned sounded = fm6_port_last_sounded();
+    if (sounded == voices) {
+        return;
+    }
+
+    ++s_functional_failures;
+    printf("FUNCTIONAL_FAIL phase=%s alg=%u expected_sounded=%u actual_sounded=%u\n",
+           phase, algorithm + 1u, voices, sounded);
+}
+
 static void warmup(unsigned voices, unsigned algorithm, unsigned blocks)
 {
     fm6_port_prepare(voices, algorithm);
     for (unsigned i = 0; i < blocks; ++i) {
         fm6_port_render_block(voices, algorithm, s_mix);
+        verify_sounded(voices, algorithm, "warmup");
     }
 }
 
@@ -53,6 +74,7 @@ static uint32_t scan_algorithm(unsigned voices, unsigned algorithm)
         const uint32_t begin = esp_cpu_get_cycle_count();
         fm6_port_render_block(voices, algorithm, s_mix);
         const uint32_t end = esp_cpu_get_cycle_count();
+        verify_sounded(voices, algorithm, "scan");
         total += (uint32_t)(end - begin);
     }
     return (uint32_t)(total / SCAN_SAMPLES);
@@ -66,6 +88,7 @@ static bench_stats_t run_case(unsigned voices, unsigned algorithm)
         const uint32_t begin = esp_cpu_get_cycle_count();
         fm6_port_render_block(voices, algorithm, s_mix);
         const uint32_t end = esp_cpu_get_cycle_count();
+        verify_sounded(voices, algorithm, "percentile");
         s_samples[i] = end - begin;
     }
 
@@ -95,9 +118,17 @@ void fm6_bench_run(void)
     printf("deadline=%" PRIu32 " cycles = %.2f us\n",
            deadline_cycles(), cycles_to_us(deadline_cycles()));
     printf("upstream Felucca revision=%s\n", fm6_port_upstream_revision());
+#ifdef FM6_QEMU_CI
+    printf("QEMU_MODE=1: timing values are emulator-only; use them for regression, not physical ESP32-S3 performance.\n");
+#endif
+
+    s_functional_failures = 0;
 
     if (!fm6_port_available()) {
         printf("FM6 upstream is not staged. Run: python3 tools/import_felucca.py\n");
+#ifdef FM6_QEMU_CI
+        printf("QEMU_VALIDATION: FAIL failures=1 reason=upstream_missing\n");
+#endif
         return;
     }
 
@@ -106,8 +137,8 @@ void fm6_bench_run(void)
     uint32_t worst_mean = 0;
     for (unsigned alg = 0; alg < 32u; ++alg) {
         const uint32_t mean = scan_algorithm(12u, alg);
-        printf("  alg=%2u mean=%6" PRIu32 " cycles (%7.2f us)\n",
-               alg + 1u, mean, cycles_to_us(mean));
+        printf("  alg=%2u mean=%6" PRIu32 " cycles (%7.2f us) sounded=%u\n",
+               alg + 1u, mean, cycles_to_us(mean), fm6_port_last_sounded());
         if (mean > worst_mean) {
             worst_mean = mean;
             worst_alg = alg;
@@ -128,5 +159,10 @@ void fm6_bench_run(void)
     }
 
     printf("checksum=0x%08" PRIx32 "\n", fm6_port_checksum());
+#ifdef FM6_QEMU_CI
+    printf("QEMU_VALIDATION: %s failures=%u\n",
+           s_functional_failures == 0 ? "PASS" : "FAIL",
+           s_functional_failures);
+#endif
     printf("=== benchmark complete ===\n\n");
 }
