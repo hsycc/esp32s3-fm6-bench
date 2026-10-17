@@ -245,6 +245,13 @@ typedef struct {
     unsigned sounded;
 } render_result_t;
 
+typedef struct {
+    uint32_t aggregate;
+    unsigned active;
+    unsigned failures;
+    render_result_t voices[DX7_BANK_VOICES];
+} bank_render_result_t;
+
 static render_result_t render_imported(const uint8_t voice[DX7_VCED_SIZE])
 {
     int32_t mix[FM6_BENCH_BLOCK_FRAMES];
@@ -265,6 +272,82 @@ static render_result_t render_imported(const uint8_t voice[DX7_VCED_SIZE])
         .sounded = fm6_port_last_sounded(),
     };
     return result;
+}
+
+static bank_render_result_t render_bank_input(const uint8_t *input, size_t input_size)
+{
+    bank_render_result_t result = {.aggregate = 2166136261u};
+    uint8_t voice[DX7_VCED_SIZE];
+
+    for (unsigned i = 0; i < DX7_BANK_VOICES; ++i) {
+        if (dx7_patch_get_voice(input, input_size, i, voice) != DX7_PATCH_OK) {
+            ++result.failures;
+            continue;
+        }
+
+        result.voices[i] = render_imported(voice);
+        const render_result_t *r = &result.voices[i];
+        if (r->checksum == 0u || r->energy == 0u || r->sounded != 12u) {
+            ++result.failures;
+        } else {
+            ++result.active;
+        }
+
+        result.aggregate ^= r->checksum;
+        result.aggregate *= 16777619u;
+        result.aggregate ^= (uint32_t)r->energy;
+        result.aggregate *= 16777619u;
+        result.aggregate ^= (uint32_t)(r->energy >> 32);
+        result.aggregate *= 16777619u;
+        result.aggregate ^= r->sounded;
+        result.aggregate *= 16777619u;
+    }
+
+    return result;
+}
+
+static bool bank_results_equal(const bank_render_result_t *a, const bank_render_result_t *b)
+{
+    if (a->aggregate != b->aggregate || a->active != b->active || a->failures != b->failures) {
+        return false;
+    }
+    return memcmp(a->voices, b->voices, sizeof(a->voices)) == 0;
+}
+
+static void test_full_bank_render(void)
+{
+    static uint8_t bank[DX7_BANK_DATA_SIZE];
+    static uint8_t sysex[DX7_BANK_SYSEX_SIZE];
+    uint8_t voice[DX7_VCED_SIZE];
+
+    for (unsigned i = 0; i < DX7_BANK_VOICES; ++i) {
+        make_voice(voice, i);
+        dx7_vmem_pack(voice, bank + i * DX7_VMEM_SIZE);
+    }
+
+    const bool built = dx7_build_bank_sysex(bank, 0u, sysex) == DX7_PATCH_OK;
+    const bank_render_result_t sysex_a = built ? render_bank_input(sysex, sizeof(sysex)) : (bank_render_result_t){0};
+    const bank_render_result_t sysex_b = built ? render_bank_input(sysex, sizeof(sysex)) : (bank_render_result_t){0};
+    const bank_render_result_t raw = render_bank_input(bank, sizeof(bank));
+
+    const bool all_active = built && sysex_a.failures == 0u && sysex_a.active == DX7_BANK_VOICES;
+    const bool deterministic = all_active && bank_results_equal(&sysex_a, &sysex_b);
+    const bool formats_equal = all_active && raw.failures == 0u &&
+                               raw.active == DX7_BANK_VOICES &&
+                               bank_results_equal(&sysex_a, &raw);
+
+    check("bank_all_voices_render", all_active);
+    check("bank_render_deterministic", deterministic);
+    check("raw_bank_sysex_render_equivalence", formats_equal);
+
+    printf("QEMU_DX7_BANK_RENDER: %s voices=%u active=%u passes=2 aggregate=0x%08" PRIx32
+           " raw_aggregate=0x%08" PRIx32 " failures=%u\n",
+           (all_active && deterministic && formats_equal) ? "PASS" : "FAIL",
+           (unsigned)DX7_BANK_VOICES,
+           sysex_a.active,
+           sysex_a.aggregate,
+           raw.aggregate,
+           sysex_a.failures + sysex_b.failures + raw.failures);
 }
 
 static void test_imported_render(void)
@@ -318,6 +401,7 @@ unsigned dx7_patch_tests_run(void)
     test_raw_inputs();
     test_bank_sysex();
     test_imported_render();
+    test_full_bank_render();
 
     printf("QEMU_DX7_PATCH: %s tests=%u failures=%u single_bytes=%u bank_bytes=%u bank_voices=%u\n",
            s_failures == 0u ? "PASS" : "FAIL",
