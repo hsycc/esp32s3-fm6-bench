@@ -1,0 +1,62 @@
+name: QEMU Validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  esp32s3-qemu:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container:
+      image: espressif/idf:v6.0.3
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Stage Felucca FM6
+        run: python3 tools/import_felucca.py
+
+      - name: Configure and build ESP32-S3 QEMU image
+        env:
+          FM6_QEMU_CI: "1"
+        run: |
+          idf.py set-target esp32s3
+          idf.py build
+
+      - name: Run QEMU functional validation
+        shell: bash
+        run: |
+          set -uo pipefail
+          status=0
+          timeout --signal=TERM 120s idf.py qemu 2>&1 | tee qemu.log || status=$?
+
+          # QEMU normally keeps running after app_main's benchmark task exits,
+          # so timeout(124) is an expected process status. The firmware marker
+          # is the authoritative result.
+          if [[ "$status" != "0" && "$status" != "124" && "$status" != "143" ]]; then
+            echo "Unexpected QEMU exit status: $status"
+            exit "$status"
+          fi
+
+          grep -q "QEMU_MODE=1" qemu.log
+          grep -q "QEMU_VALIDATION: PASS failures=0" qemu.log
+          grep -q "=== benchmark complete ===" qemu.log
+
+          if grep -Eq "QEMU_VALIDATION: FAIL|FUNCTIONAL_FAIL|Guru Meditation|assert failed|panic'ed" qemu.log; then
+            echo "QEMU log contains a failure marker"
+            exit 1
+          fi
+
+          echo "ESP32-S3 QEMU functional validation passed."
+
+      - name: Upload QEMU log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32s3-qemu-log
+          path: qemu.log
+          if-no-files-found: ignore
