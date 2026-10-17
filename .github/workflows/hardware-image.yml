@@ -1,0 +1,74 @@
+name: Hardware Benchmark Image
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-hardware-image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container:
+      image: espressif/idf:v6.0.3
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Stage Felucca FM6
+        run: python3 tools/import_felucca.py
+
+      - name: Build hardware benchmark
+        run: |
+          source /opt/esp/idf/export.sh
+          idf.py set-target esp32s3
+          idf.py build
+
+      - name: Package flash bundle
+        run: |
+          source /opt/esp/idf/export.sh
+          mkdir -p hardware-benchmark
+
+          esptool --chip esp32s3 merge-bin \
+            --output hardware-benchmark/esp32s3_fm6_bench_merged.bin \
+            --flash-mode dio \
+            --flash-freq 80m \
+            --flash-size 2MB \
+            0x0 build/bootloader/bootloader.bin \
+            0x8000 build/partition_table/partition-table.bin \
+            0x10000 build/esp32s3_fm6_bench.bin
+
+          cp build/esp32s3_fm6_bench.bin hardware-benchmark/
+          cp build/esp32s3_fm6_bench.elf hardware-benchmark/
+          cp build/bootloader/bootloader.bin hardware-benchmark/
+          cp build/partition_table/partition-table.bin hardware-benchmark/
+          cp sdkconfig hardware-benchmark/sdkconfig.txt
+
+          cat > hardware-benchmark/FLASH.txt <<'EOF'
+          ESP32-S3 FM6 hardware benchmark
+
+          One-file flash command:
+            python -m esptool --chip esp32s3 -p PORT --before default-reset --after hard-reset write-flash 0x0 esp32s3_fm6_bench_merged.bin
+
+          Then open a serial monitor at 115200 baud and capture output until:
+            === benchmark complete ===
+
+          The machine-readable decision line is:
+            HARDWARE_ACCEPTANCE: PASS ...
+          or
+            HARDWARE_ACCEPTANCE: FAIL ...
+
+          Timing target is 44.1 kHz / 32 frames: 725.6 us hard block deadline.
+          EOF
+
+      - name: Upload hardware benchmark bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32s3-fm6-hardware-benchmark
+          path: hardware-benchmark/
+          if-no-files-found: error
