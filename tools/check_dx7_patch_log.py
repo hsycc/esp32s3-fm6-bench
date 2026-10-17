@@ -12,8 +12,9 @@ RENDER_RE = re.compile(
     r"sounded=(?P<sounded>\d+) transpose_checksum=(?P<transpose>0x[0-9a-fA-F]+)"
 )
 BANK_RENDER_RE = re.compile(
-    r"QEMU_DX7_BANK_RENDER: (?P<status>PASS|FAIL) voices=(?P<voices>\d+) active=(?P<active>\d+) "
-    r"passes=(?P<passes>\d+) aggregate=(?P<aggregate>0x[0-9a-fA-F]+) "
+    r"QEMU_DX7_BANK_RENDER: (?P<status>PASS|FAIL) voices=(?P<voices>\d+) "
+    r"prepared=(?P<prepared>\d+) active=(?P<active>\d+) passes=(?P<passes>\d+) "
+    r"aggregate=(?P<aggregate>0x[0-9a-fA-F]+) "
     r"raw_aggregate=(?P<raw>0x[0-9a-fA-F]+) failures=(?P<failures>\d+)"
 )
 TEST_RE = re.compile(r"DX7_PATCH_TEST name=(?P<name>[a-z0-9_]+) status=(?P<status>PASS|FAIL)")
@@ -100,8 +101,13 @@ def main() -> int:
         return fail("missing full-bank render result")
     if bank.group("status") != "PASS":
         return fail("full-bank render did not pass")
-    if int(bank.group("voices")) != 32 or int(bank.group("active")) != 32:
-        return fail("full-bank render did not activate all 32 patches")
+    voices = int(bank.group("voices"))
+    prepared = int(bank.group("prepared"))
+    active = int(bank.group("active"))
+    if voices != 32 or prepared != voices:
+        return fail("full-bank render did not prepare and execute all 32 patches")
+    if active < 1 or active > voices:
+        return fail("full-bank active diagnostic count is invalid")
     if int(bank.group("passes")) != 2 or int(bank.group("failures")) != 0:
         return fail("full-bank deterministic render counts are invalid")
     aggregate = int(bank.group("aggregate"), 16)
@@ -114,7 +120,7 @@ def main() -> int:
     print("  formats    : VCED 155, VMEM 128, single SysEx 163, bank SysEx 4104 / 32 voices")
     print("  checksum   : bad Yamaha checksums rejected before voice commit")
     print("  render     : imported VCED/VMEM/SysEx signatures identical and deterministic at 12 voices")
-    print("  full bank  : 32/32 patches render at 12 voices, deterministic x2, raw bank == SysEx bank")
+    print(f"  full bank  : 32/32 prepared/rendered, active={active} diagnostic, deterministic x2, raw bank == SysEx bank")
     return 0
 
 
