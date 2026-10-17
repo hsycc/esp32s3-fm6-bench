@@ -27,6 +27,7 @@
 
 _Static_assert(FS == FM6_BENCH_SAMPLE_RATE, "Felucca table sample rate mismatch");
 _Static_assert(CTL == FM6_BENCH_BLOCK_FRAMES, "Felucca table block size mismatch");
+_Static_assert(FP_SIZE == FM6_RUNTIME_VOICE_SIZE, "DX7 runtime voice size mismatch");
 
 static fm6_note_t s_voice[FM6_BENCH_MAX_VOICES];
 static int32_t s_note_logfreq[FM6_BENCH_MAX_VOICES];
@@ -47,6 +48,12 @@ static uint8_t clamp_u8(unsigned value, unsigned max_value)
 static uint8_t clamp_note(unsigned value)
 {
     return clamp_u8(value, 127u);
+}
+
+static int32_t patch_note_logfreq(uint8_t note)
+{
+    const int32_t transpose = (int32_t)s_patch[FP_TRNSP] - 24;
+    return fm6_note_logfreq(((int32_t)note + transpose) * 16, 0);
 }
 
 static void build_test_patch(const fm6_port_test_config_t *config)
@@ -117,6 +124,35 @@ static void build_test_patch(const fm6_port_test_config_t *config)
     s_patch[FP_TRNSP] = 24;
 }
 
+static void prepare_current_patch(unsigned voice_count,
+                                  uint8_t base_note,
+                                  uint8_t note_step,
+                                  uint8_t velocity)
+{
+    if (voice_count > FM6_BENCH_MAX_VOICES) {
+        voice_count = FM6_BENCH_MAX_VOICES;
+    }
+
+    memset(s_voice, 0, sizeof(s_voice));
+    memset(s_detune, 0, sizeof(s_detune));
+    memset(&s_lfo, 0, sizeof(s_lfo));
+    fm6_lfo_reset(&s_lfo, s_patch);
+    fm6_lfo_key(&s_lfo);
+
+    s_prepared_voices = voice_count;
+    s_feedback = s_patch[FP_FB] & 7u;
+    s_checksum = 0;
+    s_abs_energy = 0;
+    s_last_sounded = 0;
+
+    for (unsigned v = 0; v < voice_count; ++v) {
+        const uint8_t note = clamp_note((unsigned)base_note + v * (unsigned)note_step);
+        const int vel = clamp_u8(velocity, 127u);
+        fm6_note_init(&s_voice[v], s_patch, note, vel, 1);
+        s_note_logfreq[v] = patch_note_logfreq(note);
+    }
+}
+
 bool fm6_port_available(void)
 {
     return true;
@@ -133,30 +169,11 @@ void fm6_port_prepare_test(const fm6_port_test_config_t *config)
         return;
     }
 
-    const unsigned voice_count = config->voice_count > FM6_BENCH_MAX_VOICES
-        ? FM6_BENCH_MAX_VOICES
-        : config->voice_count;
-
     build_test_patch(config);
-    memset(s_voice, 0, sizeof(s_voice));
-    memset(s_detune, 0, sizeof(s_detune));
-    memset(&s_lfo, 0, sizeof(s_lfo));
-    fm6_lfo_reset(&s_lfo, s_patch);
-    fm6_lfo_key(&s_lfo);
-
-    s_prepared_voices = voice_count;
-    s_feedback = clamp_u8(config->feedback, 7u);
-    s_checksum = 0;
-    s_abs_energy = 0;
-    s_last_sounded = 0;
-
-    const unsigned note_step = config->note_step;
-    for (unsigned v = 0; v < voice_count; ++v) {
-        const uint8_t note = clamp_note((unsigned)config->base_note + v * note_step);
-        const int velocity = clamp_u8(config->velocity, 127u);
-        fm6_note_init(&s_voice[v], s_patch, note, velocity, 1);
-        s_note_logfreq[v] = fm6_note_logfreq((int32_t)note * 16, 0);
-    }
+    prepare_current_patch(config->voice_count,
+                          config->base_note,
+                          config->note_step,
+                          config->velocity);
 }
 
 void fm6_port_prepare(unsigned voice_count, unsigned algorithm)
@@ -183,6 +200,27 @@ void fm6_port_prepare(unsigned voice_count, unsigned algorithm)
         .lfo_wave = 4,
     };
     fm6_port_prepare_test(&config);
+}
+
+bool fm6_port_prepare_voice(const uint8_t voice[FM6_RUNTIME_VOICE_SIZE],
+                            unsigned voice_count,
+                            uint8_t base_note,
+                            uint8_t note_step,
+                            uint8_t velocity)
+{
+    if (voice == NULL) {
+        return false;
+    }
+
+    memcpy(s_patch, voice, FP_SIZE);
+    s_patch[FP_SIZE] = 0;
+    prepare_current_patch(voice_count, base_note, note_step, velocity);
+    return true;
+}
+
+unsigned fm6_port_patch_algorithm(void)
+{
+    return s_patch[FP_ALG] & 31u;
 }
 
 void fm6_port_render_block(unsigned voice_count, unsigned algorithm, int32_t *mix_out)
@@ -249,7 +287,7 @@ bool fm6_port_note_on(unsigned voice_index, uint8_t note, uint8_t velocity)
     velocity = clamp_u8(velocity, 127u);
     const int fresh = !s_voice[voice_index].live;
     fm6_note_init(&s_voice[voice_index], s_patch, note, velocity, fresh);
-    s_note_logfreq[voice_index] = fm6_note_logfreq((int32_t)note * 16, 0);
+    s_note_logfreq[voice_index] = patch_note_logfreq(note);
     fm6_lfo_key(&s_lfo);
     return true;
 }
@@ -300,6 +338,25 @@ void fm6_port_prepare(unsigned voice_count, unsigned algorithm)
 {
     (void)voice_count;
     (void)algorithm;
+}
+
+bool fm6_port_prepare_voice(const uint8_t voice[FM6_RUNTIME_VOICE_SIZE],
+                            unsigned voice_count,
+                            uint8_t base_note,
+                            uint8_t note_step,
+                            uint8_t velocity)
+{
+    (void)voice;
+    (void)voice_count;
+    (void)base_note;
+    (void)note_step;
+    (void)velocity;
+    return false;
+}
+
+unsigned fm6_port_patch_algorithm(void)
+{
+    return 0u;
 }
 
 void fm6_port_render_block(unsigned voice_count, unsigned algorithm, int32_t *mix_out)
