@@ -1,0 +1,9 @@
+build/
+sdkconfig
+sdkconfig.old
+.vscode/
+.DS_Store
+
+# Reproducibly generated/imported by tools/import_felucca.py
+components/fm6_port/upstream/*
+!components/fm6_port/upstream/README.md
