@@ -18,9 +18,6 @@
 
 #if FM6_UPSTREAM_PRESENT
 
-/* Felucca uses this switch to decide whether the two temporary FM buses live
- * on the stack (CPU2 path) or in shared BSS. For this single-task benchmark,
- * stack-local buses are the cleaner and more re-entrant choice. */
 #ifndef FELUCCA_CPU2
 #define FELUCCA_CPU2 1
 #endif
@@ -37,59 +34,86 @@ static uint8_t s_patch[FP_SIZE + 1u];
 static fm6_lfo_t s_lfo;
 static int32_t s_detune[6];
 static volatile uint32_t s_checksum;
+static volatile uint64_t s_abs_energy;
 static unsigned s_last_sounded;
+static unsigned s_prepared_voices;
+static uint8_t s_feedback;
 
-static void build_stress_patch(void)
+static uint8_t clamp_u8(unsigned value, unsigned max_value)
+{
+    return (uint8_t)(value > max_value ? max_value : value);
+}
+
+static uint8_t clamp_note(unsigned value)
+{
+    return clamp_u8(value, 127u);
+}
+
+static void build_test_patch(const fm6_port_test_config_t *config)
 {
     memset(s_patch, 0, sizeof(s_patch));
+
+    const uint8_t key_scale_depth = clamp_u8(config->key_scale_depth, 99u);
+    const uint8_t rate_scaling = clamp_u8(config->rate_scaling, 7u);
+    const uint8_t velocity_sensitivity = clamp_u8(config->velocity_sensitivity, 7u);
+    const uint8_t lfo_ams = clamp_u8(config->lfo_ams, 3u);
 
     for (unsigned op_index = 0; op_index < 6u; ++op_index) {
         uint8_t *op = s_patch + op_index * FP_OP;
 
-        /* Four fast stages held at full level keep all six operators active
-         * after warm-up, preventing an artificially cheap benchmark caused by
-         * operators falling below Felucca's skip threshold. */
-        for (unsigned stage = 0; stage < 4u; ++stage) {
-            op[FP_R1 + stage] = 99;
-            op[FP_L1 + stage] = 99;
+        if (config->dynamic_envelope) {
+            op[FP_R1 + 0u] = 90;
+            op[FP_R1 + 1u] = 65;
+            op[FP_R1 + 2u] = 55;
+            op[FP_R1 + 3u] = 75;
+            op[FP_L1 + 0u] = 99;
+            op[FP_L1 + 1u] = 75;
+            op[FP_L1 + 2u] = 55;
+            op[FP_L1 + 3u] = 0;
+        } else {
+            for (unsigned stage = 0; stage < 4u; ++stage) {
+                op[FP_R1 + stage] = 99;
+                op[FP_L1 + stage] = 99;
+            }
         }
 
         op[FP_BP] = 50;
-        op[FP_LD] = 0;
-        op[FP_RD] = 0;
-        op[FP_LC] = 0;
-        op[FP_RC] = 0;
-        op[FP_RS] = 7;
-        op[FP_AMS] = 0;                          /* deterministic full-level stress */
-        op[FP_KVS] = 0;
+        op[FP_LD] = key_scale_depth;
+        op[FP_RD] = key_scale_depth;
+        op[FP_LC] = key_scale_depth ? 1u : 0u;
+        op[FP_RC] = key_scale_depth ? 1u : 0u;
+        op[FP_RS] = rate_scaling;
+        op[FP_AMS] = lfo_ams;
+        op[FP_KVS] = velocity_sensitivity;
         op[FP_OL] = 99;
-        op[FP_MODE] = 0;                         /* ratio mode */
-        op[FP_FC] = (uint8_t)(1u + op_index);   /* 1x .. 6x */
-        op[FP_FF] = 0;
-        op[FP_DET] = 7;                         /* centre */
+        op[FP_MODE] = config->fixed_mode ? 1u : 0u;
+        op[FP_FC] = (uint8_t)(1u + op_index);
+        op[FP_FF] = (uint8_t)((25u + op_index * 11u) % 100u);
+        op[FP_DET] = 7;
     }
 
-    /* Pitch EG: centre pitch with fast rates. */
+    const uint8_t pitch_depth = clamp_u8(config->pitch_eg_depth, 49u);
     for (unsigned i = 0; i < 4u; ++i) {
-        s_patch[FP_PR1 + i] = 99;
-        s_patch[FP_PL1 + i] = 50;
+        s_patch[FP_PR1 + i] = pitch_depth ? 90u : 99u;
+        s_patch[FP_PL1 + i] = 50u;
+    }
+    if (pitch_depth) {
+        s_patch[FP_PL1 + 0u] = (uint8_t)(50u + pitch_depth);
+        s_patch[FP_PL1 + 1u] = (uint8_t)(50u - pitch_depth);
+        s_patch[FP_PL1 + 2u] = (uint8_t)(50u + pitch_depth / 2u);
+        s_patch[FP_PL1 + 3u] = 50u;
     }
 
-    s_patch[FP_ALG] = 0;
-    s_patch[FP_FB] = 7;
+    s_patch[FP_ALG] = clamp_u8(config->algorithm, 31u);
+    s_patch[FP_FB] = clamp_u8(config->feedback, 7u);
     s_patch[FP_OKS] = 1;
-    s_patch[FP_LFS] = 50;
-    s_patch[FP_LFD] = 0;
-
-    /* LFO modulation is deliberately disabled in the benchmark patch. The
-     * previous max-AMS test legitimately pushed every carrier below Felucca's
-     * render threshold on some control blocks, which made "sounded" a poor
-     * invariant. Algorithm/feedback cost is still exercised at full level. */
-    s_patch[FP_LPMD] = 0;
-    s_patch[FP_LAMD] = 0;
+    s_patch[FP_LFS] = clamp_u8(config->lfo_speed, 99u);
+    s_patch[FP_LFD] = clamp_u8(config->lfo_delay, 99u);
+    s_patch[FP_LPMD] = clamp_u8(config->lfo_pmd, 99u);
+    s_patch[FP_LAMD] = clamp_u8(config->lfo_amd, 99u);
     s_patch[FP_LKS] = 0;
-    s_patch[FP_LFW] = 4;
-    s_patch[FP_LPMS] = 0;
+    s_patch[FP_LFW] = clamp_u8(config->lfo_wave, 5u);
+    s_patch[FP_LPMS] = clamp_u8(config->lfo_pms, 7u);
     s_patch[FP_TRNSP] = 24;
 }
 
@@ -103,34 +127,69 @@ const char *fm6_port_upstream_revision(void)
     return FELUCCA_REVISION;
 }
 
-void fm6_port_prepare(unsigned voice_count, unsigned algorithm)
+void fm6_port_prepare_test(const fm6_port_test_config_t *config)
 {
-    if (voice_count > FM6_BENCH_MAX_VOICES) {
-        voice_count = FM6_BENCH_MAX_VOICES;
+    if (config == NULL) {
+        return;
     }
 
-    build_stress_patch();
-    s_patch[FP_ALG] = (uint8_t)(algorithm & 31u);
+    const unsigned voice_count = config->voice_count > FM6_BENCH_MAX_VOICES
+        ? FM6_BENCH_MAX_VOICES
+        : config->voice_count;
+
+    build_test_patch(config);
     memset(s_voice, 0, sizeof(s_voice));
     memset(s_detune, 0, sizeof(s_detune));
     memset(&s_lfo, 0, sizeof(s_lfo));
     fm6_lfo_reset(&s_lfo, s_patch);
     fm6_lfo_key(&s_lfo);
 
-    for (unsigned v = 0; v < voice_count; ++v) {
-        /* Spread the chord over a useful musical range so oscillator frequency
-         * paths are not all identical. */
-        const int note = 36 + (int)((v * 5u) % 48u);
-        fm6_note_init(&s_voice[v], s_patch, note, 127, 1);
-        s_note_logfreq[v] = fm6_note_logfreq(note * 16, 0);
-    }
-
+    s_prepared_voices = voice_count;
+    s_feedback = clamp_u8(config->feedback, 7u);
     s_checksum = 0;
+    s_abs_energy = 0;
     s_last_sounded = 0;
+
+    const unsigned note_step = config->note_step;
+    for (unsigned v = 0; v < voice_count; ++v) {
+        const uint8_t note = clamp_note((unsigned)config->base_note + v * note_step);
+        const int velocity = clamp_u8(config->velocity, 127u);
+        fm6_note_init(&s_voice[v], s_patch, note, velocity, 1);
+        s_note_logfreq[v] = fm6_note_logfreq((int32_t)note * 16, 0);
+    }
+}
+
+void fm6_port_prepare(unsigned voice_count, unsigned algorithm)
+{
+    const fm6_port_test_config_t config = {
+        .voice_count = voice_count,
+        .algorithm = algorithm,
+        .base_note = 36,
+        .note_step = 5,
+        .velocity = 127,
+        .feedback = 7,
+        .fixed_mode = 0,
+        .rate_scaling = 7,
+        .velocity_sensitivity = 0,
+        .key_scale_depth = 0,
+        .dynamic_envelope = 0,
+        .pitch_eg_depth = 0,
+        .lfo_speed = 50,
+        .lfo_delay = 0,
+        .lfo_pmd = 0,
+        .lfo_amd = 0,
+        .lfo_pms = 0,
+        .lfo_ams = 0,
+        .lfo_wave = 4,
+    };
+    fm6_port_prepare_test(&config);
 }
 
 void fm6_port_render_block(unsigned voice_count, unsigned algorithm, int32_t *mix_out)
 {
+    if (voice_count > s_prepared_voices) {
+        voice_count = s_prepared_voices;
+    }
     if (voice_count > FM6_BENCH_MAX_VOICES) {
         voice_count = FM6_BENCH_MAX_VOICES;
     }
@@ -151,7 +210,7 @@ void fm6_port_render_block(unsigned voice_count, unsigned algorithm, int32_t *mi
                                               lfo_delay,
                                               s_note_logfreq[v],
                                               alg,
-                                              7,
+                                              s_feedback,
                                               s_detune,
                                               0);
         if (!sounded) {
@@ -166,10 +225,18 @@ void fm6_port_render_block(unsigned voice_count, unsigned algorithm, int32_t *mi
 
     s_last_sounded = sounded_voices;
 
-    /* Keep the render observable across optimization/LTO boundaries. */
-    s_checksum ^= (uint32_t)mix_out[0];
-    s_checksum = (s_checksum << 5) | (s_checksum >> 27);
-    s_checksum ^= (uint32_t)mix_out[FM6_BENCH_BLOCK_FRAMES - 1u];
+    for (unsigned i = 0; i < FM6_BENCH_BLOCK_FRAMES; ++i) {
+        const int64_t sample = mix_out[i];
+        s_abs_energy += (uint64_t)(sample < 0 ? -sample : sample);
+        s_checksum = (s_checksum * 16777619u) ^ (uint32_t)mix_out[i];
+    }
+}
+
+void fm6_port_key_all(bool down)
+{
+    for (unsigned v = 0; v < s_prepared_voices; ++v) {
+        fm6_note_key(&s_voice[v], s_patch, down ? 1 : 0);
+    }
 }
 
 unsigned fm6_port_last_sounded(void)
@@ -182,6 +249,11 @@ uint32_t fm6_port_checksum(void)
     return s_checksum;
 }
 
+uint64_t fm6_port_abs_energy(void)
+{
+    return s_abs_energy;
+}
+
 #else
 
 bool fm6_port_available(void)
@@ -192,6 +264,11 @@ bool fm6_port_available(void)
 const char *fm6_port_upstream_revision(void)
 {
     return FELUCCA_REVISION;
+}
+
+void fm6_port_prepare_test(const fm6_port_test_config_t *config)
+{
+    (void)config;
 }
 
 void fm6_port_prepare(unsigned voice_count, unsigned algorithm)
@@ -207,12 +284,22 @@ void fm6_port_render_block(unsigned voice_count, unsigned algorithm, int32_t *mi
     memset(mix_out, 0, sizeof(int32_t) * FM6_BENCH_BLOCK_FRAMES);
 }
 
+void fm6_port_key_all(bool down)
+{
+    (void)down;
+}
+
 unsigned fm6_port_last_sounded(void)
 {
     return 0;
 }
 
 uint32_t fm6_port_checksum(void)
+{
+    return 0;
+}
+
+uint64_t fm6_port_abs_energy(void)
 {
     return 0;
 }
