@@ -6,6 +6,7 @@
 #define FM6_BENCH_SAMPLE_RATE 44100u
 #define FM6_BENCH_BLOCK_FRAMES 32u
 #define FM6_BENCH_MAX_VOICES 12u
+#define FM6_RUNTIME_VOICE_SIZE 155u
 
 typedef struct {
     unsigned voice_count;
@@ -34,6 +35,12 @@ const char *fm6_port_upstream_revision(void);
 
 void fm6_port_prepare(unsigned voice_count, unsigned algorithm);
 void fm6_port_prepare_test(const fm6_port_test_config_t *config);
+bool fm6_port_prepare_voice(const uint8_t voice[FM6_RUNTIME_VOICE_SIZE],
+                            unsigned voice_count,
+                            uint8_t base_note,
+                            uint8_t note_step,
+                            uint8_t velocity);
+unsigned fm6_port_patch_algorithm(void);
 void fm6_port_render_block(unsigned voice_count, unsigned algorithm, int32_t *mix_out);
 void fm6_port_key_all(bool down);
 bool fm6_port_note_on(unsigned voice_index, uint8_t note, uint8_t velocity);
