@@ -11,6 +11,11 @@ RENDER_RE = re.compile(
     r"DX7_PATCH_RENDER checksum=(?P<checksum>0x[0-9a-fA-F]+) energy=(?P<energy>\d+) "
     r"sounded=(?P<sounded>\d+) transpose_checksum=(?P<transpose>0x[0-9a-fA-F]+)"
 )
+BANK_RENDER_RE = re.compile(
+    r"QEMU_DX7_BANK_RENDER: (?P<status>PASS|FAIL) voices=(?P<voices>\d+) active=(?P<active>\d+) "
+    r"passes=(?P<passes>\d+) aggregate=(?P<aggregate>0x[0-9a-fA-F]+) "
+    r"raw_aggregate=(?P<raw>0x[0-9a-fA-F]+) failures=(?P<failures>\d+)"
+)
 TEST_RE = re.compile(r"DX7_PATCH_TEST name=(?P<name>[a-z0-9_]+) status=(?P<status>PASS|FAIL)")
 
 EXPECTED_TESTS = {
@@ -37,6 +42,9 @@ EXPECTED_TESTS = {
     "imported_voice_render_deterministic",
     "vced_vmem_sysex_render_equivalence",
     "imported_transpose_changes_audio",
+    "bank_all_voices_render",
+    "bank_render_deterministic",
+    "raw_bank_sysex_render_equivalence",
 }
 
 
@@ -87,11 +95,26 @@ def main() -> int:
     if transpose == 0 or transpose == checksum:
         return fail("transpose did not change imported render signature")
 
+    bank = BANK_RENDER_RE.search(text)
+    if not bank:
+        return fail("missing full-bank render result")
+    if bank.group("status") != "PASS":
+        return fail("full-bank render did not pass")
+    if int(bank.group("voices")) != 32 or int(bank.group("active")) != 32:
+        return fail("full-bank render did not activate all 32 patches")
+    if int(bank.group("passes")) != 2 or int(bank.group("failures")) != 0:
+        return fail("full-bank deterministic render counts are invalid")
+    aggregate = int(bank.group("aggregate"), 16)
+    raw = int(bank.group("raw"), 16)
+    if aggregate == 0 or raw == 0 or aggregate != raw:
+        return fail("raw-bank and SysEx-bank render signatures differ")
+
     print("DX7_PATCH_LOG_CHECK: PASS")
-    print(f"  codec      : {len(EXPECTED_TESTS)}/23 directed checks")
+    print(f"  codec      : {len(EXPECTED_TESTS)}/{len(EXPECTED_TESTS)} directed checks")
     print("  formats    : VCED 155, VMEM 128, single SysEx 163, bank SysEx 4104 / 32 voices")
     print("  checksum   : bad Yamaha checksums rejected before voice commit")
     print("  render     : imported VCED/VMEM/SysEx signatures identical and deterministic at 12 voices")
+    print("  full bank  : 32/32 patches render at 12 voices, deterministic x2, raw bank == SysEx bank")
     return 0
 
 
