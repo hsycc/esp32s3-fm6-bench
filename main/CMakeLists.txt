@@ -4,6 +4,7 @@ idf_component_register(
         "bench_stats.c"
         "fm6_bench.c"
         "fm6_feature_tests.c"
+        "fm6_event_stress.c"
     INCLUDE_DIRS "."
     REQUIRES fm6_port esp_hw_support
 )
