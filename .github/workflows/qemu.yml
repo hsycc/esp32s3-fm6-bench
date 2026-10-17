@@ -78,7 +78,7 @@ jobs:
             echo 'QEMU is the primary project gate. Timing below is emulator-only and is used for version-to-version regression, not as physical ESP32-S3 performance.'
             echo
             echo '```text'
-            grep -E 'worst scan result:|QEMU_DETERMINISM|QEMU_FEATURE_MATRIX|QEMU_SOAK|QEMU_RESULT|QEMU_VALIDATION|QEMU_LOG_CHECK' qemu.log || true
+            grep -E 'worst scan result:|QEMU_DETERMINISM|QEMU_FEATURE_MATRIX|QEMU_SOAK|QEMU_EVENT_STRESS|QEMU_RESULT|QEMU_VALIDATION|QEMU_LOG_CHECK' qemu.log || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
