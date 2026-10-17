@@ -13,6 +13,10 @@ jobs:
     container:
       image: espressif/idf:v6.0.3
 
+    defaults:
+      run:
+        shell: bash
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,12 +28,13 @@ jobs:
         env:
           FM6_QEMU_CI: "1"
         run: |
+          source /opt/esp/idf/export.sh
           idf.py set-target esp32s3
           idf.py build
 
       - name: Run QEMU functional validation
-        shell: bash
         run: |
+          source /opt/esp/idf/export.sh
           set -uo pipefail
           status=0
           timeout --signal=TERM 120s idf.py qemu 2>&1 | tee qemu.log || status=$?
