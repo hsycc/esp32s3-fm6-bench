@@ -36,6 +36,8 @@ void fm6_port_prepare(unsigned voice_count, unsigned algorithm);
 void fm6_port_prepare_test(const fm6_port_test_config_t *config);
 void fm6_port_render_block(unsigned voice_count, unsigned algorithm, int32_t *mix_out);
 void fm6_port_key_all(bool down);
+bool fm6_port_note_on(unsigned voice_index, uint8_t note, uint8_t velocity);
+bool fm6_port_note_off(unsigned voice_index);
 unsigned fm6_port_last_sounded(void);
 uint32_t fm6_port_checksum(void);
 uint64_t fm6_port_abs_energy(void);
