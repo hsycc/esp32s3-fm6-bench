@@ -48,6 +48,7 @@ jobs:
           cp build/bootloader/bootloader.bin hardware-benchmark/
           cp build/partition_table/partition-table.bin hardware-benchmark/
           cp sdkconfig hardware-benchmark/sdkconfig.txt
+          cp tools/parse_hardware_log.py hardware-benchmark/
 
           cat > hardware-benchmark/FLASH.txt <<'EOF'
           ESP32-S3 FM6 hardware benchmark
@@ -58,12 +59,20 @@ jobs:
           Then open a serial monitor at 115200 baud and capture output until:
             === benchmark complete ===
 
-          The machine-readable decision line is:
-            HARDWARE_ACCEPTANCE: PASS ...
-          or
-            HARDWARE_ACCEPTANCE: FAIL ...
+          One boot measures both:
+            1. Raw FM6 render pinned to Core1.
+            2. The same 12-voice render while Core0 runs a repeatable synthetic DRAM/ALU workload.
+
+          Machine-readable decision lines:
+            HARDWARE_ACCEPTANCE: PASS|FAIL ...
+            HARDWARE_STRESS_ACCEPTANCE: PASS|FAIL ...
+
+          Parse a captured serial log with:
+            python3 parse_hardware_log.py serial-log.txt
 
           Timing target is 44.1 kHz / 32 frames: 725.6 us hard block deadline.
+          Engineering gates for both raw and stress runs are:
+            mean < 400 us, p95 < 450 us, p99 < 500 us, max < 600 us, deadline misses = 0.
           EOF
 
       - name: Upload hardware benchmark bundle
