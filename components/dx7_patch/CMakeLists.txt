@@ -1,5 +1,7 @@
 idf_component_register(
-    SRCS "dx7_patch.c"
+    SRCS
+        "dx7_patch.c"
+        "dx7_import.c"
     INCLUDE_DIRS "."
 )
 
