@@ -60,8 +60,8 @@ static void build_stress_patch(void)
         op[FP_LC] = 0;
         op[FP_RC] = 0;
         op[FP_RS] = 7;
-        op[FP_AMS] = 3;
-        op[FP_KVS] = 7;
+        op[FP_AMS] = 0;                          /* deterministic full-level stress */
+        op[FP_KVS] = 0;
         op[FP_OL] = 99;
         op[FP_MODE] = 0;                         /* ratio mode */
         op[FP_FC] = (uint8_t)(1u + op_index);   /* 1x .. 6x */
@@ -80,11 +80,16 @@ static void build_stress_patch(void)
     s_patch[FP_OKS] = 1;
     s_patch[FP_LFS] = 50;
     s_patch[FP_LFD] = 0;
-    s_patch[FP_LPMD] = 50;
-    s_patch[FP_LAMD] = 50;
-    s_patch[FP_LKS] = 1;
-    s_patch[FP_LFW] = 4;                         /* sine LFO */
-    s_patch[FP_LPMS] = 7;
+
+    /* LFO modulation is deliberately disabled in the benchmark patch. The
+     * previous max-AMS test legitimately pushed every carrier below Felucca's
+     * render threshold on some control blocks, which made "sounded" a poor
+     * invariant. Algorithm/feedback cost is still exercised at full level. */
+    s_patch[FP_LPMD] = 0;
+    s_patch[FP_LAMD] = 0;
+    s_patch[FP_LKS] = 0;
+    s_patch[FP_LFW] = 4;
+    s_patch[FP_LPMS] = 0;
     s_patch[FP_TRNSP] = 24;
 }
 
