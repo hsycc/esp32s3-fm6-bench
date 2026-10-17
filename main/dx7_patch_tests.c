@@ -262,14 +262,19 @@ static render_result_t render_imported(const uint8_t voice[DX7_VCED_SIZE])
     }
 
     const unsigned algorithm = fm6_port_patch_algorithm();
+    unsigned peak_sounded = 0u;
     for (unsigned i = 0; i < TEST_BLOCKS; ++i) {
         fm6_port_render_block(12u, algorithm, mix);
+        const unsigned sounded = fm6_port_last_sounded();
+        if (sounded > peak_sounded) {
+            peak_sounded = sounded;
+        }
     }
 
     const render_result_t result = {
         .checksum = fm6_port_checksum(),
         .energy = fm6_port_abs_energy(),
-        .sounded = fm6_port_last_sounded(),
+        .sounded = peak_sounded,
     };
     return result;
 }
