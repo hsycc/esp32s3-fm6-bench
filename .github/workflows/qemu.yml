@@ -1,10 +1,14 @@
-name: QEMU Validation
+name: QEMU Main Validation
 
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
+
+concurrency:
+  group: qemu-fm6-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   esp32s3-qemu:
@@ -32,7 +36,7 @@ jobs:
           idf.py set-target esp32s3
           idf.py build
 
-      - name: Run QEMU functional validation
+      - name: Run QEMU FM6 validation
         run: |
           source /opt/esp/idf/export.sh
           set -uo pipefail
@@ -53,7 +57,6 @@ jobs:
             sleep 1
           done
 
-          # Kill the whole process group so idf.py and its QEMU child both stop.
           kill -TERM -- "-$qpid" 2>/dev/null || true
           wait "$qpid" 2>/dev/null || true
 
@@ -64,16 +67,20 @@ jobs:
             exit 1
           fi
 
-          grep -q "QEMU_MODE=1" qemu.log
-          grep -q "QEMU_VALIDATION: PASS failures=0" qemu.log
-          grep -q "=== benchmark complete ===" qemu.log
+          python3 tools/check_qemu_log.py qemu.log
 
-          if grep -Eq "QEMU_VALIDATION: FAIL|FUNCTIONAL_FAIL|Guru Meditation|assert failed|panic'ed" qemu.log; then
-            echo "QEMU log contains a failure marker"
-            exit 1
-          fi
-
-          echo "ESP32-S3 QEMU functional validation passed."
+      - name: Publish QEMU summary
+        if: always()
+        run: |
+          {
+            echo '## ESP32-S3 FM6 QEMU validation'
+            echo
+            echo 'QEMU is the primary project gate. Timing below is emulator-only and is used for version-to-version regression, not as physical ESP32-S3 performance.'
+            echo
+            echo '```text'
+            grep -E 'worst scan result:|QEMU_RESULT|QEMU_VALIDATION|QEMU_LOG_CHECK' qemu.log || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload QEMU log
         if: always()
