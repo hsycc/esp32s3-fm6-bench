@@ -39,7 +39,7 @@ jobs:
       - name: Run QEMU FM6 validation
         run: |
           source /opt/esp/idf/export.sh
-          set -uo pipefail
+          set -euo pipefail
           : > qemu.log
 
           setsid idf.py qemu > qemu.log 2>&1 &
