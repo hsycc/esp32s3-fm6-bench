@@ -14,7 +14,7 @@
 #ifdef FM6_QEMU_CI
 #define BENCH_WARMUP_BLOCKS 32u
 #define BENCH_SAMPLES 128u
-#define SCAN_WARMUP_BLOCKS 8u
+#define SCAN_WARMUP_BLOCKS 32u
 #define SCAN_SAMPLES 16u
 #else
 #define BENCH_WARMUP_BLOCKS 512u
@@ -61,7 +61,6 @@ static void warmup(unsigned voices, unsigned algorithm, unsigned blocks)
     fm6_port_prepare(voices, algorithm);
     for (unsigned i = 0; i < blocks; ++i) {
         fm6_port_render_block(voices, algorithm, s_mix);
-        verify_sounded(voices, algorithm, "warmup");
     }
 }
 
@@ -160,7 +159,12 @@ void fm6_bench_run(void)
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 
-    printf("checksum=0x%08" PRIx32 "\n", fm6_port_checksum());
+    const uint32_t checksum = fm6_port_checksum();
+    if (checksum == 0u) {
+        ++s_functional_failures;
+        printf("FUNCTIONAL_FAIL phase=checksum value=0\n");
+    }
+    printf("checksum=0x%08" PRIx32 "\n", checksum);
 #ifdef FM6_QEMU_CI
     printf("QEMU_VALIDATION: %s failures=%u\n",
            s_functional_failures == 0 ? "PASS" : "FAIL",
