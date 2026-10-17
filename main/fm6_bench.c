@@ -57,11 +57,6 @@ static double cycles_to_us(uint32_t cycles)
 }
 
 #ifndef FM6_QEMU_CI
-/* A deliberately synthetic Core0 workload. It does integer arithmetic and
- * repeatedly touches 4 KiB of internal DRAM for ~500 us, then sleeps for one
- * RTOS tick. This is not intended to model a specific UI exactly; it gives us
- * a repeatable way to observe cross-core/cache/bus sensitivity while the FM6
- * render stays pinned to Core1. */
 static volatile int s_core0_stress_enabled;
 static volatile uint32_t s_core0_stress_sink;
 static uint32_t s_core0_stress_mem[1024];
@@ -130,7 +125,7 @@ static void warmup(unsigned voices, unsigned algorithm, unsigned blocks)
     }
 }
 
-static uint32_t scan_algorithm(unsigned voices, unsigned algorithm)
+static uint32_t scan_algorithm(unsigned voices, unsigned algorithm, const char *phase)
 {
     warmup(voices, algorithm, SCAN_WARMUP_BLOCKS);
 
@@ -139,7 +134,7 @@ static uint32_t scan_algorithm(unsigned voices, unsigned algorithm)
         const uint32_t begin = esp_cpu_get_cycle_count();
         fm6_port_render_block(voices, algorithm, s_mix);
         const uint32_t end = esp_cpu_get_cycle_count();
-        verify_sounded(voices, algorithm, "scan");
+        verify_sounded(voices, algorithm, phase);
         total += (uint32_t)(end - begin);
     }
     return (uint32_t)(total / SCAN_SAMPLES);
@@ -237,8 +232,11 @@ void fm6_bench_run(void)
     printf("\n[1/2] scanning all 32 algorithms at 12 voices...\n");
     unsigned worst_alg = 0;
     uint32_t worst_mean = 0;
+#ifdef FM6_QEMU_CI
+    uint32_t algorithm_signatures[32] = {0};
+#endif
     for (unsigned alg = 0; alg < 32u; ++alg) {
-        const uint32_t mean = scan_algorithm(12u, alg);
+        const uint32_t mean = scan_algorithm(12u, alg, "scan");
         const uint32_t signature = fm6_port_checksum();
         printf("  alg=%2u mean=%6" PRIu32 " cycles (%7.2f us) sounded=%u checksum=0x%08" PRIx32 "\n",
                alg + 1u, mean, cycles_to_us(mean), fm6_port_last_sounded(), signature);
@@ -246,6 +244,9 @@ void fm6_bench_run(void)
             ++s_functional_failures;
             printf("FUNCTIONAL_FAIL phase=algorithm_signature alg=%u value=0\n", alg + 1u);
         }
+#ifdef FM6_QEMU_CI
+        algorithm_signatures[alg] = signature;
+#endif
         if (mean > worst_mean) {
             worst_mean = mean;
             worst_alg = alg;
@@ -255,6 +256,29 @@ void fm6_bench_run(void)
 
     printf("worst scan result: algorithm %u, mean=%" PRIu32 " cycles (%.2f us)\n",
            worst_alg + 1u, worst_mean, cycles_to_us(worst_mean));
+
+#ifdef FM6_QEMU_CI
+    printf("\n[determinism] repeating all 32 algorithms...\n");
+    unsigned determinism_failures = 0;
+    for (unsigned alg = 0; alg < 32u; ++alg) {
+        (void)scan_algorithm(12u, alg, "determinism");
+        const uint32_t actual = fm6_port_checksum();
+        const uint32_t expected = algorithm_signatures[alg];
+        printf("  det alg=%2u expected=0x%08" PRIx32 " actual=0x%08" PRIx32 " sounded=%u\n",
+               alg + 1u, expected, actual, fm6_port_last_sounded());
+        if (actual != expected) {
+            ++determinism_failures;
+            ++s_functional_failures;
+            printf("FUNCTIONAL_FAIL phase=determinism alg=%u expected=0x%08" PRIx32
+                   " actual=0x%08" PRIx32 "\n",
+                   alg + 1u, expected, actual);
+        }
+        taskYIELD();
+    }
+    printf("QEMU_DETERMINISM: %s algorithms=32 failures=%u\n",
+           determinism_failures == 0u ? "PASS" : "FAIL",
+           determinism_failures);
+#endif
 
     printf("\n[2/2] full percentile runs using worst scanned algorithm...\n");
     static const unsigned voice_counts[] = {6u, 8u, 10u, 12u};
