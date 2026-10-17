@@ -8,3 +8,7 @@ idf_component_register(
 )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -O2)
+
+if(DEFINED ENV{FM6_QEMU_CI})
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE FM6_QEMU_CI=1)
+endif()
