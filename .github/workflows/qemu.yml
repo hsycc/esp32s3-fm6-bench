@@ -36,15 +36,32 @@ jobs:
         run: |
           source /opt/esp/idf/export.sh
           set -uo pipefail
-          status=0
-          timeout --signal=TERM 120s idf.py qemu 2>&1 | tee qemu.log || status=$?
+          : > qemu.log
 
-          # QEMU normally keeps running after app_main's benchmark task exits,
-          # so timeout(124) is an expected process status. The firmware marker
-          # is the authoritative result.
-          if [[ "$status" != "0" && "$status" != "124" && "$status" != "143" ]]; then
-            echo "Unexpected QEMU exit status: $status"
-            exit "$status"
+          setsid idf.py qemu > qemu.log 2>&1 &
+          qpid=$!
+          complete=0
+
+          for _ in $(seq 1 120); do
+            if grep -q "=== benchmark complete ===" qemu.log; then
+              complete=1
+              break
+            fi
+            if ! kill -0 "$qpid" 2>/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+
+          # Kill the whole process group so idf.py and its QEMU child both stop.
+          kill -TERM -- "-$qpid" 2>/dev/null || true
+          wait "$qpid" 2>/dev/null || true
+
+          cat qemu.log
+
+          if [[ "$complete" != "1" ]]; then
+            echo "QEMU benchmark did not complete within the validation window"
+            exit 1
           fi
 
           grep -q "QEMU_MODE=1" qemu.log
