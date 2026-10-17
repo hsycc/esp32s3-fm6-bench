@@ -7,6 +7,7 @@
 
 #ifdef FM6_QEMU_CI
 #include "dx7_import_tests.h"
+#include "dx7_layout_tests.h"
 #include "dx7_patch_tests.h"
 #define FM6_BENCH_CORE 0
 #else
@@ -17,6 +18,11 @@ static void bench_task(void *arg)
 {
     (void)arg;
 #ifdef FM6_QEMU_CI
+    const unsigned dx7_layout_failures = dx7_layout_tests_run();
+    printf("QEMU_DX7_LAYOUT_GATE: %s failures=%u\n",
+           dx7_layout_failures == 0u ? "PASS" : "FAIL",
+           dx7_layout_failures);
+
     const unsigned dx7_patch_failures = dx7_patch_tests_run();
     printf("QEMU_DX7_PATCH_GATE: %s failures=%u\n",
            dx7_patch_failures == 0u ? "PASS" : "FAIL",
