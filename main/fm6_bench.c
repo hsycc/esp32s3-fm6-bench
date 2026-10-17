@@ -54,6 +54,60 @@ static double cycles_to_us(uint32_t cycles)
     return (double)cycles / (double)cpu_mhz();
 }
 
+#ifndef FM6_QEMU_CI
+/* A deliberately synthetic Core0 workload. It does integer arithmetic and
+ * repeatedly touches 4 KiB of internal DRAM for ~500 us, then sleeps for one
+ * RTOS tick. This is not intended to model a specific UI exactly; it gives us
+ * a repeatable way to observe cross-core/cache/bus sensitivity while the FM6
+ * render stays pinned to Core1. */
+static volatile int s_core0_stress_enabled;
+static volatile uint32_t s_core0_stress_sink;
+static uint32_t s_core0_stress_mem[1024];
+
+static void core0_stress_task(void *arg)
+{
+    (void)arg;
+    uint32_t x = 0x6d2b79f5u;
+
+    for (;;) {
+        if (!s_core0_stress_enabled) {
+            vTaskDelay(pdMS_TO_TICKS(1));
+            continue;
+        }
+
+        const uint32_t begin = esp_cpu_get_cycle_count();
+        const uint32_t busy_cycles = us_to_cycles(500u);
+        unsigned i = 0;
+        do {
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            const unsigned index = i++ & 1023u;
+            s_core0_stress_mem[index] = x + s_core0_stress_mem[(index + 257u) & 1023u];
+        } while ((uint32_t)(esp_cpu_get_cycle_count() - begin) < busy_cycles);
+
+        s_core0_stress_sink = x ^ s_core0_stress_mem[i & 1023u];
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+}
+
+static void start_core0_stress_task(void)
+{
+    const BaseType_t ok = xTaskCreatePinnedToCore(
+        core0_stress_task,
+        "fm6_core0_stress",
+        3072,
+        NULL,
+        5,
+        NULL,
+        0);
+    if (ok != pdPASS) {
+        ++s_functional_failures;
+        printf("FUNCTIONAL_FAIL phase=core0_stress_task_create\n");
+    }
+}
+#endif
+
 static void verify_sounded(unsigned voices, unsigned algorithm, const char *phase)
 {
     const unsigned sounded = fm6_port_last_sounded();
@@ -89,7 +143,7 @@ static uint32_t scan_algorithm(unsigned voices, unsigned algorithm)
     return (uint32_t)(total / SCAN_SAMPLES);
 }
 
-static bench_stats_t run_case(unsigned voices, unsigned algorithm)
+static bench_stats_t run_case(unsigned voices, unsigned algorithm, const char *phase)
 {
     warmup(voices, algorithm, BENCH_WARMUP_BLOCKS);
 
@@ -97,7 +151,7 @@ static bench_stats_t run_case(unsigned voices, unsigned algorithm)
         const uint32_t begin = esp_cpu_get_cycle_count();
         fm6_port_render_block(voices, algorithm, s_mix);
         const uint32_t end = esp_cpu_get_cycle_count();
-        verify_sounded(voices, algorithm, "percentile");
+        verify_sounded(voices, algorithm, phase);
         s_samples[i] = end - begin;
     }
 
@@ -129,6 +183,21 @@ static int hardware_accepts(const bench_stats_t *s)
            s->max < us_to_cycles(TARGET_MAX_US) &&
            s->deadline_misses == 0u;
 }
+
+static void print_hardware_result(const char *name,
+                                  unsigned algorithm,
+                                  const bench_stats_t *s,
+                                  uint32_t checksum)
+{
+    printf("%s voices=12 alg=%u mean_cycles=%" PRIu32
+           " p95_cycles=%" PRIu32 " p99_cycles=%" PRIu32
+           " max_cycles=%" PRIu32 " deadline_misses=%" PRIu32
+           " checksum=0x%08" PRIx32 "\n",
+           name,
+           algorithm + 1u,
+           s->mean, s->p95, s->p99, s->max,
+           s->deadline_misses, checksum);
+}
 #endif
 
 void fm6_bench_run(void)
@@ -144,7 +213,7 @@ void fm6_bench_run(void)
 #ifdef FM6_QEMU_CI
     printf("QEMU_MODE=1: timing values are emulator-only; use them for regression, not physical ESP32-S3 performance.\n");
 #else
-    printf("BENCH_MODE=HARDWARE core=1\n");
+    printf("BENCH_MODE=HARDWARE audio_core=1 stress_core=0\n");
 #endif
 
     s_functional_failures = 0;
@@ -158,6 +227,10 @@ void fm6_bench_run(void)
 #endif
         return;
     }
+
+#ifndef FM6_QEMU_CI
+    start_core0_stress_task();
+#endif
 
     printf("\n[1/2] scanning all 32 algorithms at 12 voices...\n");
     unsigned worst_alg = 0;
@@ -181,7 +254,7 @@ void fm6_bench_run(void)
     bench_stats_t stats12 = {0};
     for (unsigned i = 0; i < sizeof(voice_counts) / sizeof(voice_counts[0]); ++i) {
         const unsigned voices = voice_counts[i];
-        const bench_stats_t stats = run_case(voices, worst_alg);
+        const bench_stats_t stats = run_case(voices, worst_alg, "percentile");
         print_stats(voices, worst_alg, &stats);
         if (voices == 12u) {
             stats12 = stats;
@@ -200,17 +273,24 @@ void fm6_bench_run(void)
            s_functional_failures == 0 ? "PASS" : "FAIL",
            s_functional_failures);
 #else
-    printf("HARDWARE_RESULT voices=12 alg=%u mean_cycles=%" PRIu32
-           " p95_cycles=%" PRIu32 " p99_cycles=%" PRIu32
-           " max_cycles=%" PRIu32 " deadline_misses=%" PRIu32
-           " checksum=0x%08" PRIx32 "\n",
-           worst_alg + 1u,
-           stats12.mean, stats12.p95, stats12.p99, stats12.max,
-           stats12.deadline_misses, checksum);
+    print_hardware_result("HARDWARE_RESULT", worst_alg, &stats12, checksum);
     printf("HARDWARE_ACCEPTANCE: %s failures=%u targets_us=%u/%u/%u/%u\n",
            hardware_accepts(&stats12) ? "PASS" : "FAIL",
            s_functional_failures,
            TARGET_MEAN_US, TARGET_P95_US, TARGET_P99_US, TARGET_MAX_US);
+
+    printf("\n[stress] 12 voices with synthetic Core0 DRAM/ALU load...\n");
+    s_core0_stress_enabled = 1;
+    vTaskDelay(pdMS_TO_TICKS(20));
+    const bench_stats_t loaded12 = run_case(12u, worst_alg, "core0_stress");
+    s_core0_stress_enabled = 0;
+    const uint32_t loaded_checksum = fm6_port_checksum();
+    print_stats(12u, worst_alg, &loaded12);
+    print_hardware_result("HARDWARE_STRESS_RESULT", worst_alg, &loaded12, loaded_checksum);
+    printf("HARDWARE_STRESS_ACCEPTANCE: %s failures=%u stress_sink=0x%08" PRIx32 "\n",
+           hardware_accepts(&loaded12) ? "PASS" : "FAIL",
+           s_functional_failures,
+           s_core0_stress_sink);
 #endif
     printf("=== benchmark complete ===\n\n");
 }
