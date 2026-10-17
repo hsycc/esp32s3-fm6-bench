@@ -247,7 +247,8 @@ bool fm6_port_note_on(unsigned voice_index, uint8_t note, uint8_t velocity)
 
     note = clamp_note(note);
     velocity = clamp_u8(velocity, 127u);
-    fm6_note_init(&s_voice[voice_index], s_patch, note, velocity, 1);
+    const int fresh = !s_voice[voice_index].live;
+    fm6_note_init(&s_voice[voice_index], s_patch, note, velocity, fresh);
     s_note_logfreq[voice_index] = fm6_note_logfreq((int32_t)note * 16, 0);
     fm6_lfo_key(&s_lfo);
     return true;
