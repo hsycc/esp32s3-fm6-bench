@@ -5,8 +5,9 @@ idf_component_register(
         "fm6_bench.c"
         "fm6_feature_tests.c"
         "fm6_event_stress.c"
+        "dx7_patch_tests.c"
     INCLUDE_DIRS "."
-    REQUIRES fm6_port esp_hw_support
+    REQUIRES fm6_port dx7_patch esp_hw_support
 )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -O2)
