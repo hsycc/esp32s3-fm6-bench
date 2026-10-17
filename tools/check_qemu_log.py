@@ -11,7 +11,10 @@ DET_RE = re.compile(
     r"actual=(?P<actual>0x[0-9a-fA-F]+) sounded=(?P<sounded>\d+)"
 )
 VOICE_RE = re.compile(
-    r"FM6 voices=(?P<voices>\d+) alg=(?P<alg>\d+) \| cycles .*? mean=(?P<mean>\d+) .*? p95=(?P<p95>\d+) .*? p99=(?P<p99>\d+) max=(?P<max>\d+) misses=(?P<misses>\d+)"
+    r"FM6 voices=(?P<voices>\d+) alg=(?P<alg>\d+) \| cycles "
+    r"min=(?P<min>\d+) mean=(?P<mean>\d+) p50=(?P<p50>\d+) "
+    r"p95=(?P<p95>\d+) p99=(?P<p99>\d+) max=(?P<max>\d+) "
+    r"misses=(?P<misses>\d+)"
 )
 RESULT_RE = re.compile(
     r"QEMU_RESULT voices=(?P<voices>\d+) alg=(?P<alg>\d+) mean_cycles=(?P<mean>\d+) "
