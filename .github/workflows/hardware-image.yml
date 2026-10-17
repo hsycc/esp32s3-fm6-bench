@@ -1,8 +1,6 @@
 name: Hardware Benchmark Image
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -53,6 +51,8 @@ jobs:
           cat > hardware-benchmark/FLASH.txt <<'EOF'
           ESP32-S3 FM6 hardware benchmark
 
+          This workflow is manual-only. Normal development validation uses ESP32-S3 QEMU.
+
           One-file flash command:
             python -m esptool --chip esp32s3 -p PORT --before default-reset --after hard-reset write-flash 0x0 esp32s3_fm6_bench_merged.bin
 
@@ -69,10 +69,6 @@ jobs:
 
           Parse a captured serial log with:
             python3 parse_hardware_log.py serial-log.txt
-
-          Timing target is 44.1 kHz / 32 frames: 725.6 us hard block deadline.
-          Engineering gates for both raw and stress runs are:
-            mean < 400 us, p95 < 450 us, p99 < 500 us, max < 600 us, deadline misses = 0.
           EOF
 
       - name: Upload hardware benchmark bundle
