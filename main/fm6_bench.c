@@ -6,6 +6,9 @@
 
 #include "bench_stats.h"
 #include "fm6_port.h"
+#ifdef FM6_QEMU_CI
+#include "fm6_feature_tests.h"
+#endif
 #include "esp_cpu.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -229,7 +232,7 @@ void fm6_bench_run(void)
     start_core0_stress_task();
 #endif
 
-    printf("\n[1/2] scanning all 32 algorithms at 12 voices...\n");
+    printf("\n[1/3] scanning all 32 algorithms at 12 voices...\n");
     unsigned worst_alg = 0;
     uint32_t worst_mean = 0;
 #ifdef FM6_QEMU_CI
@@ -240,9 +243,13 @@ void fm6_bench_run(void)
         const uint32_t signature = fm6_port_checksum();
         printf("  alg=%2u mean=%6" PRIu32 " cycles (%7.2f us) sounded=%u checksum=0x%08" PRIx32 "\n",
                alg + 1u, mean, cycles_to_us(mean), fm6_port_last_sounded(), signature);
-        if (signature == 0u) {
+        if (signature == 0u || fm6_port_abs_energy() == 0u) {
             ++s_functional_failures;
-            printf("FUNCTIONAL_FAIL phase=algorithm_signature alg=%u value=0\n", alg + 1u);
+            printf("FUNCTIONAL_FAIL phase=algorithm_signature alg=%u checksum=0x%08" PRIx32
+                   " energy=%" PRIu64 "\n",
+                   alg + 1u,
+                   signature,
+                   fm6_port_abs_energy());
         }
 #ifdef FM6_QEMU_CI
         algorithm_signatures[alg] = signature;
@@ -278,9 +285,12 @@ void fm6_bench_run(void)
     printf("QEMU_DETERMINISM: %s algorithms=32 failures=%u\n",
            determinism_failures == 0u ? "PASS" : "FAIL",
            determinism_failures);
+
+    printf("\n[2/3] DX7 feature matrix and deterministic soak...\n");
+    s_functional_failures += fm6_feature_tests_run();
 #endif
 
-    printf("\n[2/2] full percentile runs using worst scanned algorithm...\n");
+    printf("\n[3/3] full percentile runs using worst scanned algorithm...\n");
     static const unsigned voice_counts[] = {6u, 8u, 10u, 12u};
     bench_stats_t stats12 = {0};
     for (unsigned i = 0; i < sizeof(voice_counts) / sizeof(voice_counts[0]); ++i) {
@@ -294,9 +304,11 @@ void fm6_bench_run(void)
     }
 
     const uint32_t checksum = fm6_port_checksum();
-    if (checksum == 0u) {
+    if (checksum == 0u || fm6_port_abs_energy() == 0u) {
         ++s_functional_failures;
-        printf("FUNCTIONAL_FAIL phase=checksum value=0\n");
+        printf("FUNCTIONAL_FAIL phase=checksum checksum=0x%08" PRIx32 " energy=%" PRIu64 "\n",
+               checksum,
+               fm6_port_abs_energy());
     }
     printf("checksum=0x%08" PRIx32 "\n", checksum);
 #ifdef FM6_QEMU_CI
@@ -307,7 +319,7 @@ void fm6_bench_run(void)
            worst_alg + 1u,
            stats12.mean, stats12.p95, stats12.p99, stats12.max,
            stats12.deadline_misses, checksum);
-    printf("QEMU_VALIDATION: %s failures=%u algorithms=32 voices=6/8/10/12\n",
+    printf("QEMU_VALIDATION: %s failures=%u algorithms=32 features=12 voices=6/8/10/12\n",
            s_functional_failures == 0 ? "PASS" : "FAIL",
            s_functional_failures);
 #else
