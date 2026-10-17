@@ -37,6 +37,7 @@ static uint8_t s_patch[FP_SIZE + 1u];
 static fm6_lfo_t s_lfo;
 static int32_t s_detune[6];
 static volatile uint32_t s_checksum;
+static unsigned s_last_sounded;
 
 static void build_stress_patch(void)
 {
@@ -120,6 +121,7 @@ void fm6_port_prepare(unsigned voice_count, unsigned algorithm)
     }
 
     s_checksum = 0;
+    s_last_sounded = 0;
 }
 
 void fm6_port_render_block(unsigned voice_count, unsigned algorithm, int32_t *mix_out)
@@ -133,6 +135,7 @@ void fm6_port_render_block(unsigned voice_count, unsigned algorithm, int32_t *mi
     const int32_t lfo_value = fm6_lfo_sample(&s_lfo);
     const int32_t lfo_delay = fm6_lfo_delay(&s_lfo);
     const uint32_t alg = algorithm & 31u;
+    unsigned sounded_voices = 0;
 
     for (unsigned v = 0; v < voice_count; ++v) {
         int32_t voice_out[FM6_BENCH_BLOCK_FRAMES] = {0};
@@ -150,15 +153,23 @@ void fm6_port_render_block(unsigned voice_count, unsigned algorithm, int32_t *mi
             continue;
         }
 
+        ++sounded_voices;
         for (unsigned i = 0; i < FM6_BENCH_BLOCK_FRAMES; ++i) {
             mix_out[i] += voice_out[i];
         }
     }
 
+    s_last_sounded = sounded_voices;
+
     /* Keep the render observable across optimization/LTO boundaries. */
     s_checksum ^= (uint32_t)mix_out[0];
     s_checksum = (s_checksum << 5) | (s_checksum >> 27);
     s_checksum ^= (uint32_t)mix_out[FM6_BENCH_BLOCK_FRAMES - 1u];
+}
+
+unsigned fm6_port_last_sounded(void)
+{
+    return s_last_sounded;
 }
 
 uint32_t fm6_port_checksum(void)
@@ -189,6 +200,11 @@ void fm6_port_render_block(unsigned voice_count, unsigned algorithm, int32_t *mi
     (void)voice_count;
     (void)algorithm;
     memset(mix_out, 0, sizeof(int32_t) * FM6_BENCH_BLOCK_FRAMES);
+}
+
+unsigned fm6_port_last_sounded(void)
+{
+    return 0;
 }
 
 uint32_t fm6_port_checksum(void)
