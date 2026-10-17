@@ -23,6 +23,11 @@
 #define SCAN_SAMPLES 512u
 #endif
 
+#define TARGET_MEAN_US 400u
+#define TARGET_P95_US 450u
+#define TARGET_P99_US 500u
+#define TARGET_MAX_US 600u
+
 static uint32_t s_samples[BENCH_SAMPLES];
 static int32_t s_mix[FM6_BENCH_BLOCK_FRAMES];
 static unsigned s_functional_failures;
@@ -37,6 +42,11 @@ static uint32_t deadline_cycles(void)
     const uint64_t hz = (uint64_t)cpu_mhz() * 1000000ull;
     return (uint32_t)((hz * FM6_BENCH_BLOCK_FRAMES + FM6_BENCH_SAMPLE_RATE - 1u) /
                       FM6_BENCH_SAMPLE_RATE);
+}
+
+static uint32_t us_to_cycles(uint32_t us)
+{
+    return us * cpu_mhz();
 }
 
 static double cycles_to_us(uint32_t cycles)
@@ -109,6 +119,18 @@ static void print_stats(unsigned voices, unsigned algorithm, const bench_stats_t
            cycles_to_us(s->p95), cycles_to_us(s->p99), cycles_to_us(s->max));
 }
 
+#ifndef FM6_QEMU_CI
+static int hardware_accepts(const bench_stats_t *s)
+{
+    return s_functional_failures == 0u &&
+           s->mean < us_to_cycles(TARGET_MEAN_US) &&
+           s->p95 < us_to_cycles(TARGET_P95_US) &&
+           s->p99 < us_to_cycles(TARGET_P99_US) &&
+           s->max < us_to_cycles(TARGET_MAX_US) &&
+           s->deadline_misses == 0u;
+}
+#endif
+
 void fm6_bench_run(void)
 {
     printf("\n=== ESP32-S3 FM6 benchmark ===\n");
@@ -121,6 +143,8 @@ void fm6_bench_run(void)
     printf("upstream Felucca revision=%s\n", fm6_port_upstream_revision());
 #ifdef FM6_QEMU_CI
     printf("QEMU_MODE=1: timing values are emulator-only; use them for regression, not physical ESP32-S3 performance.\n");
+#else
+    printf("BENCH_MODE=HARDWARE core=1\n");
 #endif
 
     s_functional_failures = 0;
@@ -129,6 +153,8 @@ void fm6_bench_run(void)
         printf("FM6 upstream is not staged. Run: python3 tools/import_felucca.py\n");
 #ifdef FM6_QEMU_CI
         printf("QEMU_VALIDATION: FAIL failures=1 reason=upstream_missing\n");
+#else
+        printf("HARDWARE_ACCEPTANCE: FAIL failures=1 reason=upstream_missing\n");
 #endif
         return;
     }
@@ -152,10 +178,14 @@ void fm6_bench_run(void)
 
     printf("\n[2/2] full percentile runs using worst scanned algorithm...\n");
     static const unsigned voice_counts[] = {6u, 8u, 10u, 12u};
+    bench_stats_t stats12 = {0};
     for (unsigned i = 0; i < sizeof(voice_counts) / sizeof(voice_counts[0]); ++i) {
         const unsigned voices = voice_counts[i];
         const bench_stats_t stats = run_case(voices, worst_alg);
         print_stats(voices, worst_alg, &stats);
+        if (voices == 12u) {
+            stats12 = stats;
+        }
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 
@@ -169,6 +199,18 @@ void fm6_bench_run(void)
     printf("QEMU_VALIDATION: %s failures=%u\n",
            s_functional_failures == 0 ? "PASS" : "FAIL",
            s_functional_failures);
+#else
+    printf("HARDWARE_RESULT voices=12 alg=%u mean_cycles=%" PRIu32
+           " p95_cycles=%" PRIu32 " p99_cycles=%" PRIu32
+           " max_cycles=%" PRIu32 " deadline_misses=%" PRIu32
+           " checksum=0x%08" PRIx32 "\n",
+           worst_alg + 1u,
+           stats12.mean, stats12.p95, stats12.p99, stats12.max,
+           stats12.deadline_misses, checksum);
+    printf("HARDWARE_ACCEPTANCE: %s failures=%u targets_us=%u/%u/%u/%u\n",
+           hardware_accepts(&stats12) ? "PASS" : "FAIL",
+           s_functional_failures,
+           TARGET_MEAN_US, TARGET_P95_US, TARGET_P99_US, TARGET_MAX_US);
 #endif
     printf("=== benchmark complete ===\n\n");
 }
