@@ -67,6 +67,10 @@ bool fm6_note_queue_submit_all_notes_off(fm6_note_queue_t *queue,
 unsigned fm6_note_queue_pending(const fm6_note_queue_t *queue);
 uint32_t fm6_note_queue_rejected(const fm6_note_queue_t *queue);
 
+/* Consumer-side flush used at a program change so note events generated for the
+ * previous patch cannot leak into the freshly reset voice pool. */
+void fm6_note_queue_discard_pending(fm6_note_queue_t *queue);
+
 /* Runtime assumes fm6_port_load_program() has already prepared a silent patch
  * with voice_capacity slots. All note events are applied at the beginning of
  * render_block(), before the corresponding 32-frame block is synthesized. */
@@ -75,7 +79,7 @@ bool fm6_note_runtime_init(fm6_note_runtime_t *runtime,
                            unsigned voice_capacity);
 
 /* Reset allocator metadata after a program change. The FM port should already
- * have been reset by fm6_port_load_program(). */
+ * have been reset by fm6_port_load_program(). Pending note events are discarded. */
 bool fm6_note_runtime_reset(fm6_note_runtime_t *runtime,
                             unsigned voice_capacity);
 
