@@ -20,6 +20,10 @@ EXPECTED_TESTS = {
     "bank_missing_checksum_no_f7",
     "truncated_bank_keeps_complete_voices",
     "unknown_yamaha_block_skipped",
+    "mixed_bank_single_stream",
+    "truncated_single_recovers_next_sysex",
+    "non_yamaha_block_skipped",
+    "trailing_truncated_header_preserves_voice",
     "raw_vced_tolerant_import",
     "raw_vmem_tolerant_import",
     "raw_bank_tolerant_import",
@@ -71,9 +75,10 @@ def main() -> int:
         return fail(f"tolerant imported render sounded={render.group('sounded')} expected=12")
 
     print("DX7_IMPORT_LOG_CHECK: PASS")
-    print("  tolerant   : concatenated messages, junk bytes, missing checksum/F7, count mismatch")
-    print("  recovery   : truncated bank keeps only complete 128-byte voices")
-    print("  isolation  : unknown Yamaha blocks skipped; bad checksum surfaced as a warning flag")
+    print(f"  corpus     : {len(EXPECTED_TESTS)}/{len(EXPECTED_TESTS)} directed tolerant-import checks")
+    print("  tolerant   : concatenated messages, mixed bank/single streams, junk bytes, missing checksum/F7, count mismatch")
+    print("  recovery   : truncated bank/single and trailing partial header preserve valid voices and resume at the next SysEx")
+    print("  isolation  : unknown Yamaha/non-Yamaha blocks skipped; bad checksum surfaced as a warning flag")
     print("  raw input  : 155-byte VCED, 128-byte VMEM and 4096-byte bank")
     print("  render     : tolerant-imported voice matches canonical 12-voice render")
     return 0
