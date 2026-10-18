@@ -10,6 +10,7 @@
 #include "dx7_import_tests.h"
 #include "dx7_layout_tests.h"
 #include "dx7_patch_tests.h"
+#include "fm6_program_queue_tests.h"
 #define FM6_BENCH_CORE 0
 #else
 #define FM6_BENCH_CORE 1
@@ -38,6 +39,11 @@ static void bench_task(void *arg)
     printf("QEMU_DX7_IMPORT_STRESS_GATE: %s failures=%u\n",
            dx7_import_stress_failures == 0u ? "PASS" : "FAIL",
            dx7_import_stress_failures);
+
+    const unsigned fm6_program_queue_failures = fm6_program_queue_tests_run();
+    printf("QEMU_FM6_PROGRAM_QUEUE_GATE: %s failures=%u\n",
+           fm6_program_queue_failures == 0u ? "PASS" : "FAIL",
+           fm6_program_queue_failures);
 #endif
     fm6_bench_run();
     vTaskDelete(NULL);
