@@ -62,6 +62,7 @@ typedef struct {
     uint32_t unmatched_note_offs;
     uint32_t ignored_without_program;
     uint32_t active_program_sequence;
+    uint32_t last_command_sequence;
 } fm6_control_runtime_t;
 
 void fm6_control_queue_init(fm6_control_queue_t *queue);
@@ -106,3 +107,4 @@ uint32_t fm6_control_runtime_ignored_without_program(const fm6_control_runtime_t
 uint32_t fm6_control_runtime_commands_applied(const fm6_control_runtime_t *runtime);
 uint32_t fm6_control_runtime_rendered_blocks(const fm6_control_runtime_t *runtime);
 uint32_t fm6_control_runtime_active_program_sequence(const fm6_control_runtime_t *runtime);
+uint32_t fm6_control_runtime_last_command_sequence(const fm6_control_runtime_t *runtime);
