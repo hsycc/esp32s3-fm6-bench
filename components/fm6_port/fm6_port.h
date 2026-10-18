@@ -35,11 +35,22 @@ const char *fm6_port_upstream_revision(void);
 
 void fm6_port_prepare(unsigned voice_count, unsigned algorithm);
 void fm6_port_prepare_test(const fm6_port_test_config_t *config);
+
+/* Benchmark helper: load a canonical 155-byte DX7 voice and immediately prefill
+ * the requested polyphony with active notes. Product/runtime code should prefer
+ * fm6_port_load_program(), which leaves the voice pool silent. */
 bool fm6_port_prepare_voice(const uint8_t voice[FM6_RUNTIME_VOICE_SIZE],
                             unsigned voice_count,
                             uint8_t base_note,
                             uint8_t note_step,
                             uint8_t velocity);
+
+/* Product/runtime program load. Copies the canonical patch, resets LFO/voice
+ * state and reserves voice_capacity slots, but does not start any notes. */
+bool fm6_port_load_program(const uint8_t voice[FM6_RUNTIME_VOICE_SIZE],
+                           unsigned voice_capacity);
+
+unsigned fm6_port_voice_capacity(void);
 unsigned fm6_port_patch_algorithm(void);
 void fm6_port_render_block(unsigned voice_count, unsigned algorithm, int32_t *mix_out);
 void fm6_port_key_all(bool down);
