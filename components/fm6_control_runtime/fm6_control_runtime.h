@@ -12,6 +12,8 @@ typedef enum {
     FM6_CONTROL_NOTE_ON = 2,
     FM6_CONTROL_NOTE_OFF = 3,
     FM6_CONTROL_ALL_NOTES_OFF = 4,
+    FM6_CONTROL_SUSTAIN = 5,
+    FM6_CONTROL_ALL_SOUND_OFF = 6,
 } fm6_control_type_t;
 
 typedef struct {
@@ -26,6 +28,9 @@ typedef struct {
             uint8_t note;
             uint8_t velocity;
         } note;
+        struct {
+            uint8_t value;
+        } control;
     } data;
 } fm6_control_command_t;
 
@@ -40,14 +45,15 @@ typedef struct {
 typedef struct {
     bool assigned;
     bool down;
+    bool sustained;
     uint8_t note;
-    uint8_t reserved;
     uint32_t age;
 } fm6_control_voice_slot_t;
 
 typedef struct {
     fm6_control_queue_t *queue;
     bool program_active;
+    bool sustain_down;
     unsigned voice_capacity;
     fm6_control_voice_slot_t voices[FM6_BENCH_MAX_VOICES];
     uint32_t age_counter;
@@ -57,6 +63,8 @@ typedef struct {
     uint32_t note_on_events;
     uint32_t note_off_events;
     uint32_t all_notes_off_events;
+    uint32_t sustain_events;
+    uint32_t all_sound_off_events;
     uint32_t retrigger_events;
     uint32_t voice_steals;
     uint32_t unmatched_note_offs;
@@ -78,24 +86,29 @@ bool fm6_control_queue_submit_note_off(fm6_control_queue_t *queue,
                                        uint32_t *sequence_out);
 bool fm6_control_queue_submit_all_notes_off(fm6_control_queue_t *queue,
                                             uint32_t *sequence_out);
+bool fm6_control_queue_submit_sustain(fm6_control_queue_t *queue,
+                                      bool down,
+                                      uint32_t *sequence_out);
+bool fm6_control_queue_submit_all_sound_off(fm6_control_queue_t *queue,
+                                            uint32_t *sequence_out);
 unsigned fm6_control_queue_pending(const fm6_control_queue_t *queue);
 uint32_t fm6_control_queue_rejected(const fm6_control_queue_t *queue);
 
 bool fm6_control_runtime_init(fm6_control_runtime_t *runtime,
                               fm6_control_queue_t *queue);
 
-/* Snapshot semantics: only commands published when the block begins are consumed.
- * The snapshot is processed strictly FIFO before any samples in the block render.
- * Multiple program changes in one snapshot are legal; the final program is the
- * one that can be heard, and note events between programs are reset by the later
- * program command. */
+/* Commands published before block entry are consumed in strict FIFO order before
+ * that 32-frame block renders. MIDI controller state therefore shares the same
+ * cross-core ordering as Program and Note events. */
 bool fm6_control_runtime_render_block(fm6_control_runtime_t *runtime,
                                       int32_t out[FM6_BENCH_BLOCK_FRAMES],
                                       unsigned *commands_applied_out);
 
 bool fm6_control_runtime_program_active(const fm6_control_runtime_t *runtime);
+bool fm6_control_runtime_sustain_down(const fm6_control_runtime_t *runtime);
 unsigned fm6_control_runtime_voice_capacity(const fm6_control_runtime_t *runtime);
 unsigned fm6_control_runtime_notes_down(const fm6_control_runtime_t *runtime);
+unsigned fm6_control_runtime_sustained_notes(const fm6_control_runtime_t *runtime);
 bool fm6_control_runtime_note_is_down(const fm6_control_runtime_t *runtime, uint8_t note);
 int fm6_control_runtime_voice_for_note(const fm6_control_runtime_t *runtime, uint8_t note);
 uint32_t fm6_control_runtime_program_commits(const fm6_control_runtime_t *runtime);
@@ -103,6 +116,8 @@ uint32_t fm6_control_runtime_voice_steals(const fm6_control_runtime_t *runtime);
 uint32_t fm6_control_runtime_retriggers(const fm6_control_runtime_t *runtime);
 uint32_t fm6_control_runtime_unmatched_note_offs(const fm6_control_runtime_t *runtime);
 uint32_t fm6_control_runtime_ignored_without_program(const fm6_control_runtime_t *runtime);
+uint32_t fm6_control_runtime_sustain_events(const fm6_control_runtime_t *runtime);
+uint32_t fm6_control_runtime_all_sound_off_events(const fm6_control_runtime_t *runtime);
 uint32_t fm6_control_runtime_commands_applied(const fm6_control_runtime_t *runtime);
 uint32_t fm6_control_runtime_rendered_blocks(const fm6_control_runtime_t *runtime);
 uint32_t fm6_control_runtime_active_program_sequence(const fm6_control_runtime_t *runtime);
