@@ -6,6 +6,7 @@ idf_component_register(
         "fm6_feature_tests.c"
         "fm6_event_stress.c"
         "fm6_program_queue_tests.c"
+        "fm6_program_queue_dualcore_tests.c"
         "dx7_patch_tests.c"
         "dx7_import_tests.c"
         "dx7_import_stress_tests.c"
