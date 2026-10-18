@@ -71,8 +71,8 @@ bool fm6_program_queue_submit(fm6_program_queue_t *queue,
     return true;
 }
 
-bool fm6_program_queue_commit_next(fm6_program_queue_t *queue,
-                                   uint32_t *generation_out)
+bool fm6_program_queue_commit_next_ex(fm6_program_queue_t *queue,
+                                      fm6_program_applied_t *applied_out)
 {
     if (queue == NULL) {
         return false;
@@ -95,14 +95,29 @@ bool fm6_program_queue_commit_next(fm6_program_queue_t *queue,
         return false;
     }
 
-    store_release(&queue->active_generation, command->generation);
-    __atomic_add_fetch(&queue->committed_count, 1u, __ATOMIC_RELAXED);
-    if (generation_out != NULL) {
-        *generation_out = command->generation;
+    if (applied_out != NULL) {
+        applied_out->generation = command->generation;
+        applied_out->voice_count = command->voice_count;
+        applied_out->base_note = command->base_note;
+        applied_out->note_step = command->note_step;
+        applied_out->velocity = command->velocity;
     }
 
+    store_release(&queue->active_generation, command->generation);
+    __atomic_add_fetch(&queue->committed_count, 1u, __ATOMIC_RELAXED);
     store_release(&queue->read_count, read + 1u);
     return true;
+}
+
+bool fm6_program_queue_commit_next(fm6_program_queue_t *queue,
+                                   uint32_t *generation_out)
+{
+    fm6_program_applied_t applied = {0};
+    const bool committed = fm6_program_queue_commit_next_ex(queue, &applied);
+    if (committed && generation_out != NULL) {
+        *generation_out = applied.generation;
+    }
+    return committed;
 }
 
 unsigned fm6_program_queue_pending(const fm6_program_queue_t *queue)
