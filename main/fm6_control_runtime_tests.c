@@ -112,16 +112,29 @@ static bool start_runtime(void)
     return fm6_control_runtime_init(&s_runtime, &s_queue);
 }
 
-static bool render_one(unsigned *applied)
+static bool render_block(int32_t out[FM6_BENCH_BLOCK_FRAMES], unsigned *applied)
 {
-    int32_t out[FM6_BENCH_BLOCK_FRAMES];
+    int32_t local[FM6_BENCH_BLOCK_FRAMES];
+    if (out == NULL) {
+        out = local;
+    }
     return fm6_control_runtime_render_block(&s_runtime, out, applied);
+}
+
+static bool all_zero(const int32_t out[FM6_BENCH_BLOCK_FRAMES])
+{
+    for (unsigned i = 0; i < FM6_BENCH_BLOCK_FRAMES; ++i) {
+        if (out[i] != 0) {
+            return false;
+        }
+    }
+    return true;
 }
 
 static void render_until_energy(unsigned limit)
 {
     for (unsigned i = 0; i < limit && fm6_port_abs_energy() == 0u; ++i) {
-        (void)render_one(NULL);
+        (void)render_block(NULL, NULL);
     }
 }
 
@@ -129,14 +142,14 @@ static void test_preprogram_note_is_ignored_safely(void)
 {
     const bool started = start_runtime();
     const bool queued = fm6_control_queue_submit_note_on(&s_queue, 60u, 100u, NULL);
+    int32_t out[FM6_BENCH_BLOCK_FRAMES];
     unsigned applied = 0u;
-    const bool rendered = render_one(&applied);
+    const bool rendered = render_block(out, &applied);
     check("preprogram_note_ignored",
-          started && queued && rendered && applied == 1u &&
+          started && queued && rendered && applied == 1u && all_zero(out) &&
           !fm6_control_runtime_program_active(&s_runtime) &&
           fm6_control_runtime_ignored_without_program(&s_runtime) == 1u &&
-          fm6_control_runtime_notes_down(&s_runtime) == 0u &&
-          fm6_port_abs_energy() == 0u);
+          fm6_control_runtime_notes_down(&s_runtime) == 0u);
 }
 
 static void test_program_only_starts_silent(void)
@@ -145,10 +158,11 @@ static void test_program_only_starts_silent(void)
     uint32_t program_sequence = 0u;
     const bool queued = fm6_control_queue_submit_program(
         &s_queue, s_voice_a, 12u, &program_sequence);
+    int32_t out[FM6_BENCH_BLOCK_FRAMES];
     unsigned applied = 0u;
-    const bool rendered = render_one(&applied);
+    const bool rendered = render_block(out, &applied);
     check("program_only_starts_silent",
-          started && queued && rendered && applied == 1u &&
+          started && queued && rendered && applied == 1u && all_zero(out) &&
           program_sequence == 1u &&
           fm6_control_runtime_program_active(&s_runtime) &&
           fm6_control_runtime_voice_capacity(&s_runtime) == 12u &&
@@ -169,7 +183,7 @@ static void test_program_then_note_same_boundary(void)
                         fm6_control_queue_submit_note_on(
                             &s_queue, 60u, 110u, &note_sequence);
     unsigned applied = 0u;
-    const bool rendered = render_one(&applied);
+    const bool rendered = render_block(NULL, &applied);
     render_until_energy(8u);
     check("program_then_note_same_boundary",
           started && queued && rendered && applied == 2u &&
@@ -187,17 +201,18 @@ static void test_note_then_program_resets_old_state(void)
     const bool started = start_runtime();
     bool ok = fm6_control_queue_submit_program(&s_queue, s_voice_a, 12u, NULL) &&
               fm6_control_queue_submit_note_on(&s_queue, 60u, 110u, NULL) &&
-              render_one(NULL);
+              render_block(NULL, NULL);
 
     ok &= fm6_control_queue_submit_note_on(&s_queue, 62u, 100u, NULL);
     uint32_t program_b_sequence = 0u;
     ok &= fm6_control_queue_submit_program(
         &s_queue, s_voice_b, 12u, &program_b_sequence);
+    int32_t out[FM6_BENCH_BLOCK_FRAMES];
     unsigned applied = 0u;
-    ok &= render_one(&applied);
+    ok &= render_block(out, &applied);
 
     check("note_then_program_resets_old_state",
-          started && ok && applied == 2u &&
+          started && ok && applied == 2u && all_zero(out) &&
           fm6_control_runtime_active_program_sequence(&s_runtime) == program_b_sequence &&
           fm6_port_patch_algorithm() == 21u &&
           fm6_control_runtime_notes_down(&s_runtime) == 0u &&
@@ -218,7 +233,7 @@ static void test_program_note_program_note_total_order(void)
         fm6_control_queue_submit_program(&s_queue, s_voice_b, 12u, &seq_b) &&
         fm6_control_queue_submit_note_on(&s_queue, 72u, 120u, NULL);
     unsigned applied = 0u;
-    const bool rendered = render_one(&applied);
+    const bool rendered = render_block(NULL, &applied);
     render_until_energy(8u);
 
     check("program_note_program_note_total_order",
@@ -240,10 +255,11 @@ static void test_multiple_programs_latest_wins(void)
     const bool queued =
         fm6_control_queue_submit_program(&s_queue, s_voice_a, 6u, NULL) &&
         fm6_control_queue_submit_program(&s_queue, s_voice_b, 10u, &seq_b);
+    int32_t out[FM6_BENCH_BLOCK_FRAMES];
     unsigned applied = 0u;
-    const bool rendered = render_one(&applied);
+    const bool rendered = render_block(out, &applied);
     check("multiple_programs_latest_wins",
-          started && queued && rendered && applied == 2u &&
+          started && queued && rendered && applied == 2u && all_zero(out) &&
           fm6_control_runtime_program_commits(&s_runtime) == 2u &&
           fm6_control_runtime_active_program_sequence(&s_runtime) == seq_b &&
           fm6_control_runtime_voice_capacity(&s_runtime) == 10u &&
@@ -260,10 +276,10 @@ static void test_thirteenth_note_steals_oldest(void)
             &s_queue, (uint8_t)(36u + i), (uint8_t)(90u + i), NULL);
     }
     unsigned applied = 0u;
-    ok &= render_one(&applied);
+    ok &= render_block(NULL, &applied);
     const int oldest_voice = fm6_control_runtime_voice_for_note(&s_runtime, 36u);
     ok &= fm6_control_queue_submit_note_on(&s_queue, 72u, 127u, NULL);
-    ok &= render_one(NULL);
+    ok &= render_block(NULL, NULL);
 
     check("thirteenth_note_steals_oldest",
           started && ok && applied == 13u && oldest_voice == 0 &&
@@ -315,7 +331,7 @@ static void test_counter_and_sequence_wrap(void)
         fm6_control_queue_submit_note_on(&s_queue, 60u, 100u, &note_sequence) &&
         fm6_control_queue_submit_note_off(&s_queue, 60u, &off_sequence);
     unsigned applied = 0u;
-    const bool rendered = render_one(&applied);
+    const bool rendered = render_block(NULL, &applied);
 
     check("counter_and_sequence_wrap",
           started && queued && rendered && applied == 3u &&
