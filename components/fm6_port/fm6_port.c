@@ -124,33 +124,43 @@ static void build_test_patch(const fm6_port_test_config_t *config)
     s_patch[FP_TRNSP] = 24;
 }
 
-static void prepare_current_patch(unsigned voice_count,
-                                  uint8_t base_note,
-                                  uint8_t note_step,
-                                  uint8_t velocity)
+static bool reset_runtime_state(unsigned voice_count)
 {
-    if (voice_count > FM6_BENCH_MAX_VOICES) {
-        voice_count = FM6_BENCH_MAX_VOICES;
+    if (voice_count == 0u || voice_count > FM6_BENCH_MAX_VOICES) {
+        return false;
     }
 
     memset(s_voice, 0, sizeof(s_voice));
+    memset(s_note_logfreq, 0, sizeof(s_note_logfreq));
     memset(s_detune, 0, sizeof(s_detune));
     memset(&s_lfo, 0, sizeof(s_lfo));
     fm6_lfo_reset(&s_lfo, s_patch);
-    fm6_lfo_key(&s_lfo);
 
     s_prepared_voices = voice_count;
     s_feedback = s_patch[FP_FB] & 7u;
     s_checksum = 0;
     s_abs_energy = 0;
     s_last_sounded = 0;
+    return true;
+}
 
+static bool prepare_current_patch(unsigned voice_count,
+                                  uint8_t base_note,
+                                  uint8_t note_step,
+                                  uint8_t velocity)
+{
+    if (!reset_runtime_state(voice_count)) {
+        return false;
+    }
+
+    fm6_lfo_key(&s_lfo);
     for (unsigned v = 0; v < voice_count; ++v) {
         const uint8_t note = clamp_note((unsigned)base_note + v * (unsigned)note_step);
         const int vel = clamp_u8(velocity, 127u);
         fm6_note_init(&s_voice[v], s_patch, note, vel, 1);
         s_note_logfreq[v] = patch_note_logfreq(note);
     }
+    return true;
 }
 
 bool fm6_port_available(void)
@@ -170,10 +180,10 @@ void fm6_port_prepare_test(const fm6_port_test_config_t *config)
     }
 
     build_test_patch(config);
-    prepare_current_patch(config->voice_count,
-                          config->base_note,
-                          config->note_step,
-                          config->velocity);
+    (void)prepare_current_patch(config->voice_count,
+                                config->base_note,
+                                config->note_step,
+                                config->velocity);
 }
 
 void fm6_port_prepare(unsigned voice_count, unsigned algorithm)
@@ -202,20 +212,36 @@ void fm6_port_prepare(unsigned voice_count, unsigned algorithm)
     fm6_port_prepare_test(&config);
 }
 
+bool fm6_port_load_program(const uint8_t voice[FM6_RUNTIME_VOICE_SIZE],
+                           unsigned voice_capacity)
+{
+    if (voice == NULL || voice_capacity == 0u || voice_capacity > FM6_BENCH_MAX_VOICES) {
+        return false;
+    }
+
+    memcpy(s_patch, voice, FP_SIZE);
+    s_patch[FP_SIZE] = 0;
+    return reset_runtime_state(voice_capacity);
+}
+
 bool fm6_port_prepare_voice(const uint8_t voice[FM6_RUNTIME_VOICE_SIZE],
                             unsigned voice_count,
                             uint8_t base_note,
                             uint8_t note_step,
                             uint8_t velocity)
 {
-    if (voice == NULL) {
+    if (voice == NULL || voice_count == 0u || voice_count > FM6_BENCH_MAX_VOICES) {
         return false;
     }
 
     memcpy(s_patch, voice, FP_SIZE);
     s_patch[FP_SIZE] = 0;
-    prepare_current_patch(voice_count, base_note, note_step, velocity);
-    return true;
+    return prepare_current_patch(voice_count, base_note, note_step, velocity);
+}
+
+unsigned fm6_port_voice_capacity(void)
+{
+    return s_prepared_voices;
 }
 
 unsigned fm6_port_patch_algorithm(void)
@@ -340,6 +366,14 @@ void fm6_port_prepare(unsigned voice_count, unsigned algorithm)
     (void)algorithm;
 }
 
+bool fm6_port_load_program(const uint8_t voice[FM6_RUNTIME_VOICE_SIZE],
+                           unsigned voice_capacity)
+{
+    (void)voice;
+    (void)voice_capacity;
+    return false;
+}
+
 bool fm6_port_prepare_voice(const uint8_t voice[FM6_RUNTIME_VOICE_SIZE],
                             unsigned voice_count,
                             uint8_t base_note,
@@ -352,6 +386,11 @@ bool fm6_port_prepare_voice(const uint8_t voice[FM6_RUNTIME_VOICE_SIZE],
     (void)note_step;
     (void)velocity;
     return false;
+}
+
+unsigned fm6_port_voice_capacity(void)
+{
+    return 0u;
 }
 
 unsigned fm6_port_patch_algorithm(void)
