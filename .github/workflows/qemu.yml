@@ -72,6 +72,7 @@ jobs:
           python3 tools/check_dx7_import_log.py qemu.log
           python3 tools/check_dx7_import_stress_log.py qemu.log
           python3 tools/check_fm6_program_queue_log.py qemu.log
+          python3 tools/check_fm6_program_queue_dualcore_log.py qemu.log
           python3 tools/check_qemu_log.py qemu.log
 
       - name: Publish QEMU summary
@@ -83,7 +84,7 @@ jobs:
             echo 'QEMU is the primary project gate. Timing below is emulator-only and is used for version-to-version regression, not as physical ESP32-S3 performance.'
             echo
             echo '```text'
-            grep -E 'QEMU_DX7_LAYOUT|DX7_LAYOUT_LOG_CHECK|QEMU_DX7_PATCH|QEMU_DX7_BANK_RENDER|DX7_PATCH_LOG_CHECK|DX7_PATCH_RENDER|QEMU_DX7_IMPORT|DX7_IMPORT_LOG_CHECK|DX7_IMPORT_RENDER|DX7_IMPORT_STRESS|DX7_IMPORT_FUZZ|QEMU_FM6_PROGRAM_QUEUE|FM6_PROGRAM_QUEUE_SWITCH|FM6_PROGRAM_QUEUE_LOG_CHECK|worst scan result:|QEMU_DETERMINISM|QEMU_FEATURE_MATRIX|QEMU_SOAK|QEMU_EVENT_STRESS|QEMU_RESULT|QEMU_VALIDATION|QEMU_LOG_CHECK' qemu.log || true
+            grep -E 'QEMU_DX7_LAYOUT|DX7_LAYOUT_LOG_CHECK|QEMU_DX7_PATCH|QEMU_DX7_BANK_RENDER|DX7_PATCH_LOG_CHECK|DX7_PATCH_RENDER|QEMU_DX7_IMPORT|DX7_IMPORT_LOG_CHECK|DX7_IMPORT_RENDER|DX7_IMPORT_STRESS|DX7_IMPORT_FUZZ|QEMU_FM6_PROGRAM_QUEUE|FM6_PROGRAM_QUEUE_SWITCH|FM6_PROGRAM_QUEUE_LOG_CHECK|QEMU_FM6_PROGRAM_QUEUE_DUALCORE|FM6_PROGRAM_QUEUE_DUALCORE|FM6_PROGRAM_QUEUE_DUALCORE_LOG_CHECK|worst scan result:|QEMU_DETERMINISM|QEMU_FEATURE_MATRIX|QEMU_SOAK|QEMU_EVENT_STRESS|QEMU_RESULT|QEMU_VALIDATION|QEMU_LOG_CHECK' qemu.log || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
