@@ -7,12 +7,13 @@ idf_component_register(
         "fm6_event_stress.c"
         "fm6_program_queue_tests.c"
         "fm6_program_queue_dualcore_tests.c"
+        "fm6_audio_runtime_tests.c"
         "dx7_patch_tests.c"
         "dx7_import_tests.c"
         "dx7_import_stress_tests.c"
         "dx7_layout_tests.c"
     INCLUDE_DIRS "."
-    REQUIRES fm6_port fm6_program_queue dx7_patch esp_hw_support
+    REQUIRES fm6_port fm6_program_queue fm6_audio_runtime dx7_patch esp_hw_support
 )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -O2)
