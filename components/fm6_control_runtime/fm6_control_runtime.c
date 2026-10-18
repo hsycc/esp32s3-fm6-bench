@@ -121,6 +121,26 @@ static bool submit_note_command(fm6_control_queue_t *queue,
     return true;
 }
 
+static bool submit_control_command(fm6_control_queue_t *queue,
+                                   fm6_control_type_t type,
+                                   uint8_t value,
+                                   uint32_t *sequence_out)
+{
+    if (queue == NULL) {
+        return false;
+    }
+
+    fm6_control_command_t *command = NULL;
+    uint32_t write = 0u;
+    if (!reserve_slot(queue, &command, &write)) {
+        return false;
+    }
+
+    command->data.control.value = value;
+    publish_slot(queue, command, write, type, sequence_out);
+    return true;
+}
+
 bool fm6_control_queue_submit_note_on(fm6_control_queue_t *queue,
                                       uint8_t note,
                                       uint8_t velocity,
@@ -142,20 +162,20 @@ bool fm6_control_queue_submit_note_off(fm6_control_queue_t *queue,
 bool fm6_control_queue_submit_all_notes_off(fm6_control_queue_t *queue,
                                             uint32_t *sequence_out)
 {
-    if (queue == NULL) {
-        return false;
-    }
+    return submit_control_command(queue, FM6_CONTROL_ALL_NOTES_OFF, 0u, sequence_out);
+}
 
-    fm6_control_command_t *command = NULL;
-    uint32_t write = 0u;
-    if (!reserve_slot(queue, &command, &write)) {
-        return false;
-    }
+bool fm6_control_queue_submit_sustain(fm6_control_queue_t *queue,
+                                      bool down,
+                                      uint32_t *sequence_out)
+{
+    return submit_control_command(queue, FM6_CONTROL_SUSTAIN, down ? 1u : 0u, sequence_out);
+}
 
-    command->data.note.note = 0u;
-    command->data.note.velocity = 0u;
-    publish_slot(queue, command, write, FM6_CONTROL_ALL_NOTES_OFF, sequence_out);
-    return true;
+bool fm6_control_queue_submit_all_sound_off(fm6_control_queue_t *queue,
+                                            uint32_t *sequence_out)
+{
+    return submit_control_command(queue, FM6_CONTROL_ALL_SOUND_OFF, 0u, sequence_out);
 }
 
 unsigned fm6_control_queue_pending(const fm6_control_queue_t *queue)
@@ -222,6 +242,17 @@ static int find_down_note(const fm6_control_runtime_t *runtime, uint8_t note)
     return -1;
 }
 
+static int find_active_note(const fm6_control_runtime_t *runtime, uint8_t note)
+{
+    for (unsigned i = 0; i < runtime->voice_capacity; ++i) {
+        const fm6_control_voice_slot_t *slot = &runtime->voices[i];
+        if (slot->assigned && (slot->down || slot->sustained) && slot->note == note) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
 static int find_unassigned(const fm6_control_runtime_t *runtime)
 {
     for (unsigned i = 0; i < runtime->voice_capacity; ++i) {
@@ -243,7 +274,24 @@ static int find_oldest_released(const fm6_control_runtime_t *runtime)
     uint32_t oldest = 0u;
     for (unsigned i = 0; i < runtime->voice_capacity; ++i) {
         const fm6_control_voice_slot_t *slot = &runtime->voices[i];
-        if (!slot->assigned || slot->down) {
+        if (!slot->assigned || slot->down || slot->sustained) {
+            continue;
+        }
+        if (found < 0 || age_before(slot->age, oldest)) {
+            found = (int)i;
+            oldest = slot->age;
+        }
+    }
+    return found;
+}
+
+static int find_oldest_sustained(const fm6_control_runtime_t *runtime)
+{
+    int found = -1;
+    uint32_t oldest = 0u;
+    for (unsigned i = 0; i < runtime->voice_capacity; ++i) {
+        const fm6_control_voice_slot_t *slot = &runtime->voices[i];
+        if (!slot->assigned || slot->down || !slot->sustained) {
             continue;
         }
         if (found < 0 || age_before(slot->age, oldest)) {
@@ -305,11 +353,13 @@ static bool apply_note_on(fm6_control_runtime_t *runtime,
         return true;
     }
 
-    int voice = find_down_note(runtime, note);
+    int voice = find_active_note(runtime, note);
     if (voice >= 0) {
         if (!fm6_port_note_on((unsigned)voice, note, velocity)) {
             return false;
         }
+        runtime->voices[voice].down = true;
+        runtime->voices[voice].sustained = false;
         runtime->voices[voice].age = next_age(runtime);
         ++runtime->retrigger_events;
         ++runtime->note_on_events;
@@ -319,6 +369,12 @@ static bool apply_note_on(fm6_control_runtime_t *runtime,
     voice = find_unassigned(runtime);
     if (voice < 0) {
         voice = find_oldest_released(runtime);
+    }
+    if (voice < 0) {
+        voice = find_oldest_sustained(runtime);
+        if (voice >= 0) {
+            ++runtime->voice_steals;
+        }
     }
     if (voice < 0) {
         voice = find_oldest_down(runtime);
@@ -332,6 +388,7 @@ static bool apply_note_on(fm6_control_runtime_t *runtime,
 
     runtime->voices[voice].assigned = true;
     runtime->voices[voice].down = true;
+    runtime->voices[voice].sustained = false;
     runtime->voices[voice].note = note;
     runtime->voices[voice].age = next_age(runtime);
     ++runtime->note_on_events;
@@ -351,10 +408,45 @@ static bool apply_note_off(fm6_control_runtime_t *runtime, uint8_t note)
         ++runtime->unmatched_note_offs;
         return true;
     }
-    if (!fm6_port_note_off((unsigned)voice)) {
-        return false;
-    }
+
     runtime->voices[voice].down = false;
+    if (runtime->sustain_down) {
+        runtime->voices[voice].sustained = true;
+        return true;
+    }
+
+    runtime->voices[voice].sustained = false;
+    return fm6_port_note_off((unsigned)voice);
+}
+
+static bool release_sustained(fm6_control_runtime_t *runtime)
+{
+    for (unsigned i = 0; i < runtime->voice_capacity; ++i) {
+        fm6_control_voice_slot_t *slot = &runtime->voices[i];
+        if (slot->assigned && !slot->down && slot->sustained) {
+            if (!fm6_port_note_off(i)) {
+                return false;
+            }
+            slot->sustained = false;
+        }
+    }
+    return true;
+}
+
+static bool apply_sustain(fm6_control_runtime_t *runtime, bool down)
+{
+    if (!runtime->program_active) {
+        runtime->sustain_down = down;
+        ++runtime->sustain_events;
+        return true;
+    }
+
+    const bool was_down = runtime->sustain_down;
+    runtime->sustain_down = down;
+    ++runtime->sustain_events;
+    if (was_down && !down) {
+        return release_sustained(runtime);
+    }
     return true;
 }
 
@@ -366,14 +458,34 @@ static bool apply_all_notes_off(fm6_control_runtime_t *runtime)
     }
 
     for (unsigned i = 0; i < runtime->voice_capacity; ++i) {
-        if (runtime->voices[i].assigned && runtime->voices[i].down) {
+        fm6_control_voice_slot_t *slot = &runtime->voices[i];
+        if (!slot->assigned || !slot->down) {
+            continue;
+        }
+        slot->down = false;
+        if (runtime->sustain_down) {
+            slot->sustained = true;
+        } else {
+            slot->sustained = false;
             if (!fm6_port_note_off(i)) {
                 return false;
             }
-            runtime->voices[i].down = false;
         }
     }
     ++runtime->all_notes_off_events;
+    return true;
+}
+
+static bool apply_all_sound_off(fm6_control_runtime_t *runtime)
+{
+    if (!runtime->program_active) {
+        ++runtime->ignored_without_program;
+        return true;
+    }
+
+    fm6_port_kill_all();
+    clear_allocator(runtime);
+    ++runtime->all_sound_off_events;
     return true;
 }
 
@@ -389,6 +501,10 @@ static bool apply_command(fm6_control_runtime_t *runtime,
         return apply_note_off(runtime, command->data.note.note);
     case FM6_CONTROL_ALL_NOTES_OFF:
         return apply_all_notes_off(runtime);
+    case FM6_CONTROL_SUSTAIN:
+        return apply_sustain(runtime, command->data.control.value != 0u);
+    case FM6_CONTROL_ALL_SOUND_OFF:
+        return apply_all_sound_off(runtime);
     default:
         return false;
     }
@@ -433,6 +549,11 @@ bool fm6_control_runtime_program_active(const fm6_control_runtime_t *runtime)
     return runtime != NULL && runtime->program_active;
 }
 
+bool fm6_control_runtime_sustain_down(const fm6_control_runtime_t *runtime)
+{
+    return runtime != NULL && runtime->sustain_down;
+}
+
 unsigned fm6_control_runtime_voice_capacity(const fm6_control_runtime_t *runtime)
 {
     return runtime == NULL ? 0u : runtime->voice_capacity;
@@ -446,6 +567,21 @@ unsigned fm6_control_runtime_notes_down(const fm6_control_runtime_t *runtime)
     unsigned count = 0u;
     for (unsigned i = 0; i < runtime->voice_capacity; ++i) {
         if (runtime->voices[i].assigned && runtime->voices[i].down) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+unsigned fm6_control_runtime_sustained_notes(const fm6_control_runtime_t *runtime)
+{
+    if (runtime == NULL) {
+        return 0u;
+    }
+    unsigned count = 0u;
+    for (unsigned i = 0; i < runtime->voice_capacity; ++i) {
+        if (runtime->voices[i].assigned && !runtime->voices[i].down &&
+            runtime->voices[i].sustained) {
             ++count;
         }
     }
@@ -485,6 +621,16 @@ uint32_t fm6_control_runtime_unmatched_note_offs(const fm6_control_runtime_t *ru
 uint32_t fm6_control_runtime_ignored_without_program(const fm6_control_runtime_t *runtime)
 {
     return runtime == NULL ? 0u : runtime->ignored_without_program;
+}
+
+uint32_t fm6_control_runtime_sustain_events(const fm6_control_runtime_t *runtime)
+{
+    return runtime == NULL ? 0u : runtime->sustain_events;
+}
+
+uint32_t fm6_control_runtime_all_sound_off_events(const fm6_control_runtime_t *runtime)
+{
+    return runtime == NULL ? 0u : runtime->all_sound_off_events;
 }
 
 uint32_t fm6_control_runtime_commands_applied(const fm6_control_runtime_t *runtime)
