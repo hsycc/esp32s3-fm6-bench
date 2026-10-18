@@ -1,0 +1,108 @@
+#pragma once
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "fm6_port.h"
+
+#define FM6_CONTROL_QUEUE_CAPACITY 16u
+
+typedef enum {
+    FM6_CONTROL_PROGRAM = 1,
+    FM6_CONTROL_NOTE_ON = 2,
+    FM6_CONTROL_NOTE_OFF = 3,
+    FM6_CONTROL_ALL_NOTES_OFF = 4,
+} fm6_control_type_t;
+
+typedef struct {
+    fm6_control_type_t type;
+    uint32_t sequence;
+    union {
+        struct {
+            uint8_t voice[FM6_RUNTIME_VOICE_SIZE];
+            uint8_t voice_capacity;
+        } program;
+        struct {
+            uint8_t note;
+            uint8_t velocity;
+        } note;
+    } data;
+} fm6_control_command_t;
+
+typedef struct {
+    fm6_control_command_t slots[FM6_CONTROL_QUEUE_CAPACITY];
+    uint32_t write_count;
+    uint32_t read_count;
+    uint32_t next_sequence;
+    uint32_t rejected_count;
+} fm6_control_queue_t;
+
+typedef struct {
+    bool assigned;
+    bool down;
+    uint8_t note;
+    uint8_t reserved;
+    uint32_t age;
+} fm6_control_voice_slot_t;
+
+typedef struct {
+    fm6_control_queue_t *queue;
+    bool program_active;
+    unsigned voice_capacity;
+    fm6_control_voice_slot_t voices[FM6_BENCH_MAX_VOICES];
+    uint32_t age_counter;
+    uint32_t rendered_blocks;
+    uint32_t commands_applied;
+    uint32_t program_commits;
+    uint32_t note_on_events;
+    uint32_t note_off_events;
+    uint32_t all_notes_off_events;
+    uint32_t retriggers;
+    uint32_t voice_steals;
+    uint32_t unmatched_note_offs;
+    uint32_t ignored_without_program;
+    uint32_t active_program_sequence;
+} fm6_control_runtime_t;
+
+void fm6_control_queue_init(fm6_control_queue_t *queue);
+bool fm6_control_queue_submit_program(fm6_control_queue_t *queue,
+                                      const uint8_t voice[FM6_RUNTIME_VOICE_SIZE],
+                                      unsigned voice_capacity,
+                                      uint32_t *sequence_out);
+bool fm6_control_queue_submit_note_on(fm6_control_queue_t *queue,
+                                      uint8_t note,
+                                      uint8_t velocity,
+                                      uint32_t *sequence_out);
+bool fm6_control_queue_submit_note_off(fm6_control_queue_t *queue,
+                                       uint8_t note,
+                                       uint32_t *sequence_out);
+bool fm6_control_queue_submit_all_notes_off(fm6_control_queue_t *queue,
+                                            uint32_t *sequence_out);
+unsigned fm6_control_queue_pending(const fm6_control_queue_t *queue);
+uint32_t fm6_control_queue_rejected(const fm6_control_queue_t *queue);
+
+bool fm6_control_runtime_init(fm6_control_runtime_t *runtime,
+                              fm6_control_queue_t *queue);
+
+/* Snapshot semantics: only commands published when the block begins are consumed.
+ * The snapshot is processed strictly FIFO before any samples in the block render.
+ * Multiple program changes in one snapshot are legal; the final program is the
+ * one that can be heard, and note events between programs are reset by the later
+ * program command. */
+bool fm6_control_runtime_render_block(fm6_control_runtime_t *runtime,
+                                      int32_t out[FM6_BENCH_BLOCK_FRAMES],
+                                      unsigned *commands_applied_out);
+
+bool fm6_control_runtime_program_active(const fm6_control_runtime_t *runtime);
+unsigned fm6_control_runtime_voice_capacity(const fm6_control_runtime_t *runtime);
+unsigned fm6_control_runtime_notes_down(const fm6_control_runtime_t *runtime);
+bool fm6_control_runtime_note_is_down(const fm6_control_runtime_t *runtime, uint8_t note);
+int fm6_control_runtime_voice_for_note(const fm6_control_runtime_t *runtime, uint8_t note);
+uint32_t fm6_control_runtime_program_commits(const fm6_control_runtime_t *runtime);
+uint32_t fm6_control_runtime_voice_steals(const fm6_control_runtime_t *runtime);
+uint32_t fm6_control_runtime_retriggers(const fm6_control_runtime_t *runtime);
+uint32_t fm6_control_runtime_unmatched_note_offs(const fm6_control_runtime_t *runtime);
+uint32_t fm6_control_runtime_ignored_without_program(const fm6_control_runtime_t *runtime);
+uint32_t fm6_control_runtime_commands_applied(const fm6_control_runtime_t *runtime);
+uint32_t fm6_control_runtime_rendered_blocks(const fm6_control_runtime_t *runtime);
+uint32_t fm6_control_runtime_active_program_sequence(const fm6_control_runtime_t *runtime);
