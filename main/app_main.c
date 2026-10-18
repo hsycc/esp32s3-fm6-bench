@@ -11,6 +11,7 @@
 #include "dx7_layout_tests.h"
 #include "dx7_patch_tests.h"
 #include "fm6_audio_runtime_tests.h"
+#include "fm6_note_runtime_tests.h"
 #include "fm6_program_queue_dualcore_tests.h"
 #include "fm6_program_queue_tests.h"
 #include "fm6_program_queue_wrap_tests.h"
@@ -63,6 +64,11 @@ static void bench_task(void *arg)
     printf("QEMU_FM6_AUDIO_RUNTIME_GATE: %s failures=%u\n",
            fm6_audio_runtime_failures == 0u ? "PASS" : "FAIL",
            fm6_audio_runtime_failures);
+
+    const unsigned fm6_note_runtime_failures = fm6_note_runtime_tests_run();
+    printf("QEMU_FM6_NOTE_RUNTIME_GATE: %s failures=%u\n",
+           fm6_note_runtime_failures == 0u ? "PASS" : "FAIL",
+           fm6_note_runtime_failures);
 #endif
     fm6_bench_run();
     vTaskDelete(NULL);
