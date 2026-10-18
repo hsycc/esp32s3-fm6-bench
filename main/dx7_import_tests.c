@@ -10,7 +10,7 @@
 #include "dx7_patch.h"
 #include "fm6_port.h"
 
-#define COLLECT_MAX 32u
+#define COLLECT_MAX 40u
 #define RENDER_BLOCKS 96u
 
 typedef struct {
@@ -33,7 +33,7 @@ static uint8_t s_single_a[DX7_SINGLE_SYSEX_SIZE];
 static uint8_t s_single_b[DX7_SINGLE_SYSEX_SIZE];
 static uint8_t s_bank_raw[DX7_BANK_DATA_SIZE];
 static uint8_t s_bank_sysex[DX7_BANK_SYSEX_SIZE];
-static uint8_t s_scratch[DX7_BANK_SYSEX_SIZE + DX7_SINGLE_SYSEX_SIZE + 32u];
+static uint8_t s_scratch[DX7_BANK_SYSEX_SIZE + 2u * DX7_SINGLE_SYSEX_SIZE + 64u];
 
 static unsigned s_tests;
 static unsigned s_failures;
@@ -256,6 +256,85 @@ static void test_unknown_message_is_skipped(void)
           memcmp(s_collector.voices[0], s_voice_a, DX7_VCED_SIZE) == 0);
 }
 
+static void test_mixed_bank_single_stream(void)
+{
+    size_t n = 0u;
+    memcpy(s_scratch + n, s_bank_sysex, sizeof(s_bank_sysex));
+    n += sizeof(s_bank_sysex);
+    s_scratch[n++] = 0x22u;
+    s_scratch[n++] = 0x33u;
+    memcpy(s_scratch + n, s_single_b, sizeof(s_single_b));
+    n += sizeof(s_single_b);
+
+    dx7_import_report_t report;
+    const dx7_patch_status_t status = scan(s_scratch, n, &report);
+    check("mixed_bank_single_stream",
+          status == DX7_PATCH_OK &&
+          s_collector.count == DX7_BANK_VOICES + 1u &&
+          report.messages_seen == 2u &&
+          report.bytes_skipped == 2u &&
+          (s_collector.flags[0] & DX7_IMPORT_FLAG_BANK) != 0u &&
+          (s_collector.flags[DX7_BANK_VOICES] & DX7_IMPORT_FLAG_SINGLE) != 0u &&
+          memcmp(s_collector.voices[DX7_BANK_VOICES], s_voice_b, DX7_VCED_SIZE) == 0);
+}
+
+static void test_truncated_single_recovers_at_next_sysex(void)
+{
+    const size_t partial_payload = 20u;
+    size_t n = 0u;
+    memcpy(s_scratch + n, s_single_a, 6u + partial_payload);
+    n += 6u + partial_payload;
+    memcpy(s_scratch + n, s_single_b, sizeof(s_single_b));
+    n += sizeof(s_single_b);
+
+    dx7_import_report_t report;
+    const dx7_patch_status_t status = scan(s_scratch, n, &report);
+    check("truncated_single_recovers_next_sysex",
+          status == DX7_PATCH_OK &&
+          s_collector.count == 1u &&
+          report.messages_seen == 2u &&
+          report.truncated_messages == 1u &&
+          memcmp(s_collector.voices[0], s_voice_b, DX7_VCED_SIZE) == 0);
+}
+
+static void test_non_yamaha_message_recovers(void)
+{
+    static const uint8_t foreign[] = {0xf0u, 0x7du, 0x01u, 0x02u, 0x03u, 0xf7u};
+    size_t n = 0u;
+    memcpy(s_scratch + n, foreign, sizeof(foreign));
+    n += sizeof(foreign);
+    memcpy(s_scratch + n, s_single_a, sizeof(s_single_a));
+    n += sizeof(s_single_a);
+
+    dx7_import_report_t report;
+    const dx7_patch_status_t status = scan(s_scratch, n, &report);
+    check("non_yamaha_block_skipped",
+          status == DX7_PATCH_OK &&
+          s_collector.count == 1u &&
+          report.messages_seen == 2u &&
+          report.unknown_messages == 1u &&
+          memcmp(s_collector.voices[0], s_voice_a, DX7_VCED_SIZE) == 0);
+}
+
+static void test_trailing_truncated_header_preserves_voice(void)
+{
+    size_t n = 0u;
+    memcpy(s_scratch + n, s_single_a, sizeof(s_single_a));
+    n += sizeof(s_single_a);
+    s_scratch[n++] = 0xf0u;
+    s_scratch[n++] = 0x43u;
+    s_scratch[n++] = 0x00u;
+
+    dx7_import_report_t report;
+    const dx7_patch_status_t status = scan(s_scratch, n, &report);
+    check("trailing_truncated_header_preserves_voice",
+          status == DX7_PATCH_OK &&
+          s_collector.count == 1u &&
+          report.messages_seen == 2u &&
+          report.truncated_messages == 1u &&
+          memcmp(s_collector.voices[0], s_voice_a, DX7_VCED_SIZE) == 0);
+}
+
 static void test_raw_inputs(void)
 {
     uint8_t packed[DX7_VMEM_SIZE];
@@ -331,6 +410,10 @@ unsigned dx7_import_tests_run(void)
     test_bank_count_and_missing_suffixes();
     test_truncated_bank_keeps_only_complete_voices();
     test_unknown_message_is_skipped();
+    test_mixed_bank_single_stream();
+    test_truncated_single_recovers_at_next_sysex();
+    test_non_yamaha_message_recovers();
+    test_trailing_truncated_header_preserves_voice();
     test_raw_inputs();
     test_tolerant_import_render_equivalence();
 
