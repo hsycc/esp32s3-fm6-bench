@@ -10,6 +10,7 @@
 #include "dx7_import_tests.h"
 #include "dx7_layout_tests.h"
 #include "dx7_patch_tests.h"
+#include "fm6_program_queue_dualcore_tests.h"
 #include "fm6_program_queue_tests.h"
 #define FM6_BENCH_CORE 0
 #else
@@ -44,6 +45,12 @@ static void bench_task(void *arg)
     printf("QEMU_FM6_PROGRAM_QUEUE_GATE: %s failures=%u\n",
            fm6_program_queue_failures == 0u ? "PASS" : "FAIL",
            fm6_program_queue_failures);
+
+    const unsigned fm6_program_queue_dualcore_failures =
+        fm6_program_queue_dualcore_tests_run();
+    printf("QEMU_FM6_PROGRAM_QUEUE_DUALCORE_GATE: %s failures=%u\n",
+           fm6_program_queue_dualcore_failures == 0u ? "PASS" : "FAIL",
+           fm6_program_queue_dualcore_failures);
 #endif
     fm6_bench_run();
     vTaskDelete(NULL);
