@@ -13,6 +13,7 @@
 #include "fm6_audio_runtime_tests.h"
 #include "fm6_program_queue_dualcore_tests.h"
 #include "fm6_program_queue_tests.h"
+#include "fm6_program_queue_wrap_tests.h"
 #define FM6_BENCH_CORE 0
 #else
 #define FM6_BENCH_CORE 1
@@ -52,6 +53,11 @@ static void bench_task(void *arg)
     printf("QEMU_FM6_PROGRAM_QUEUE_DUALCORE_GATE: %s failures=%u\n",
            fm6_program_queue_dualcore_failures == 0u ? "PASS" : "FAIL",
            fm6_program_queue_dualcore_failures);
+
+    const unsigned fm6_program_queue_wrap_failures = fm6_program_queue_wrap_tests_run();
+    printf("QEMU_FM6_PROGRAM_QUEUE_WRAP_GATE: %s failures=%u\n",
+           fm6_program_queue_wrap_failures == 0u ? "PASS" : "FAIL",
+           fm6_program_queue_wrap_failures);
 
     const unsigned fm6_audio_runtime_failures = fm6_audio_runtime_tests_run();
     printf("QEMU_FM6_AUDIO_RUNTIME_GATE: %s failures=%u\n",
