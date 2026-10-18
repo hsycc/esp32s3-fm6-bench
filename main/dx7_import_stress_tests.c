@@ -88,10 +88,8 @@ static void make_voice(uint8_t voice[DX7_VCED_SIZE], unsigned variant)
     voice[144] = 24u;
 
     char name[11];
-    snprintf(name, sizeof(name), "STR%02uFM6", variant % 100u);
-    for (unsigned i = 0; i < DX7_VCED_NAME_SIZE; ++i) {
-        voice[DX7_VCED_NAME_OFFSET + i] = (uint8_t)(name[i] ? name[i] : ' ');
-    }
+    snprintf(name, sizeof(name), "STR%02uFM6XY", variant % 100u);
+    memcpy(voice + DX7_VCED_NAME_OFFSET, name, DX7_VCED_NAME_SIZE);
     dx7_vced_sanitize(voice);
 }
 
@@ -221,6 +219,7 @@ static bool append_noise(uint8_t *out, size_t capacity, size_t *length, uint32_t
 static size_t build_fuzz_stream(uint8_t *out, size_t capacity, uint32_t seed)
 {
     static const uint8_t foreign[] = {0xf0u, 0x7du, 0x31u, 0x22u, 0x13u, 0xf7u};
+    static const uint8_t trailing_partial[] = {0xf0u, 0x43u, 0x00u};
     size_t n = 0u;
     uint8_t bad_single[DX7_SINGLE_SYSEX_SIZE];
     memcpy(bad_single, s_single_a, sizeof(bad_single));
@@ -242,12 +241,8 @@ static size_t build_fuzz_stream(uint8_t *out, size_t capacity, uint32_t seed)
         !append_bytes(out, capacity, &n, bad_single, sizeof(bad_single)) ||
         !append_noise(out, capacity, &n, &seed, 47u) ||
         !append_bytes(out, capacity, &n, s_single_b, sizeof(s_single_b)) ||
-        !append_noise(out, capacity, &n, &seed, 59u)) {
-        return 0u;
-    }
-
-    static const uint8_t trailing_partial[] = {0xf0u, 0x43u, 0x00u};
-    if (!append_bytes(out, capacity, &n, trailing_partial, sizeof(trailing_partial))) {
+        !append_noise(out, capacity, &n, &seed, 59u) ||
+        !append_bytes(out, capacity, &n, trailing_partial, sizeof(trailing_partial))) {
         return 0u;
     }
     return n;
@@ -268,7 +263,7 @@ static void test_callback_early_stop(void)
         s_early_stream, n, early_stop_cb, &state, &report);
 
     uint8_t expected[DX7_VCED_SIZE];
-    make_voice(expected, 4u);
+    dx7_vmem_unpack(s_bank_raw + 4u * DX7_VMEM_SIZE, expected);
     const bool pass = status == DX7_PATCH_OK &&
                       state.collector.count == state.stop_after &&
                       report.voices_found == state.stop_after &&
