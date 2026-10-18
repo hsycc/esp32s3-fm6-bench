@@ -57,7 +57,7 @@ typedef struct {
     uint32_t note_on_events;
     uint32_t note_off_events;
     uint32_t all_notes_off_events;
-    uint32_t retriggers;
+    uint32_t retrigger_events;
     uint32_t voice_steals;
     uint32_t unmatched_note_offs;
     uint32_t ignored_without_program;
