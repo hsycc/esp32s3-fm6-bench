@@ -6,6 +6,7 @@
 #include "freertos/task.h"
 
 #ifdef FM6_QEMU_CI
+#include "dx7_import_stress_tests.h"
 #include "dx7_import_tests.h"
 #include "dx7_layout_tests.h"
 #include "dx7_patch_tests.h"
@@ -32,6 +33,11 @@ static void bench_task(void *arg)
     printf("QEMU_DX7_IMPORT_GATE: %s failures=%u\n",
            dx7_import_failures == 0u ? "PASS" : "FAIL",
            dx7_import_failures);
+
+    const unsigned dx7_import_stress_failures = dx7_import_stress_tests_run();
+    printf("QEMU_DX7_IMPORT_STRESS_GATE: %s failures=%u\n",
+           dx7_import_stress_failures == 0u ? "PASS" : "FAIL",
+           dx7_import_stress_failures);
 #endif
     fm6_bench_run();
     vTaskDelete(NULL);
