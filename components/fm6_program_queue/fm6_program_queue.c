@@ -95,7 +95,7 @@ bool fm6_program_queue_commit_next(fm6_program_queue_t *queue,
         return false;
     }
 
-    __atomic_store_n(&queue->active_generation, command->generation, __ATOMIC_RELAXED);
+    store_release(&queue->active_generation, command->generation);
     __atomic_add_fetch(&queue->committed_count, 1u, __ATOMIC_RELAXED);
     if (generation_out != NULL) {
         *generation_out = command->generation;
