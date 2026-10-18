@@ -18,6 +18,14 @@ typedef struct {
 } fm6_program_command_t;
 
 typedef struct {
+    uint32_t generation;
+    uint8_t voice_count;
+    uint8_t base_note;
+    uint8_t note_step;
+    uint8_t velocity;
+} fm6_program_applied_t;
+
+typedef struct {
     fm6_program_command_t slots[FM6_PROGRAM_QUEUE_CAPACITY];
     uint32_t write_count;
     uint32_t read_count;
@@ -40,8 +48,12 @@ bool fm6_program_queue_submit(fm6_program_queue_t *queue,
                               uint8_t velocity,
                               uint32_t *generation_out);
 
-/* Commits at most one pending program into fm6_port. The caller defines the
- * block boundary by invoking this immediately before rendering the next block. */
+/* Commits at most one pending program into fm6_port and reports the exact runtime
+ * metadata that was applied. The caller defines the block boundary. */
+bool fm6_program_queue_commit_next_ex(fm6_program_queue_t *queue,
+                                      fm6_program_applied_t *applied_out);
+
+/* Backward-compatible generation-only wrapper around commit_next_ex(). */
 bool fm6_program_queue_commit_next(fm6_program_queue_t *queue,
                                    uint32_t *generation_out);
 
