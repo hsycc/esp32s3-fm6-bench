@@ -22,6 +22,7 @@ typedef struct {
     fm6_program_queue_t *queue;
     volatile uint32_t ready;
     volatile uint32_t start;
+    volatile uint32_t cancel;
     volatile uint32_t done;
     volatile uint32_t producer_core;
     volatile uint32_t accepted;
@@ -163,6 +164,12 @@ static bool submit_command(producer_ctx_t *ctx, unsigned command_index)
     return accepted;
 }
 
+static void producer_finish(producer_ctx_t *ctx)
+{
+    store_release(&ctx->done, 1u);
+    vTaskDelete(NULL);
+}
+
 static void producer_task(void *arg)
 {
     producer_ctx_t *ctx = (producer_ctx_t *)arg;
@@ -184,24 +191,30 @@ static void producer_task(void *arg)
 
     store_release(&ctx->ready, 1u);
     while (load_acquire(&ctx->start) == 0u) {
+        if (load_acquire(&ctx->cancel) != 0u) {
+            producer_finish(ctx);
+            return;
+        }
         taskYIELD();
     }
 
     for (unsigned i = FM6_PROGRAM_QUEUE_CAPACITY; i < DUALCORE_COMMANDS; ++i) {
         unsigned guard = 0u;
         while (!submit_command(ctx, i)) {
+            if (load_acquire(&ctx->cancel) != 0u) {
+                producer_finish(ctx);
+                return;
+            }
             if (++guard >= DUALCORE_WAIT_LOOPS) {
                 add_relaxed(&ctx->producer_errors, 1u);
-                store_release(&ctx->done, 1u);
-                vTaskDelete(NULL);
+                producer_finish(ctx);
                 return;
             }
             taskYIELD();
         }
     }
 
-    store_release(&ctx->done, 1u);
-    vTaskDelete(NULL);
+    producer_finish(ctx);
 }
 
 static uint32_t mix_signature(uint32_t signature,
@@ -237,6 +250,13 @@ static bool wait_flag(const volatile uint32_t *flag)
     return false;
 }
 
+static void cancel_producer(void)
+{
+    store_release(&s_producer.cancel, 1u);
+    store_release(&s_producer.start, 1u);
+    (void)wait_flag(&s_producer.done);
+}
+
 static dualcore_result_t run_dualcore_sequence(void)
 {
     dualcore_result_t result = {0};
@@ -258,6 +278,7 @@ static dualcore_result_t run_dualcore_sequence(void)
     }
 
     if (!wait_flag(&s_producer.ready)) {
+        cancel_producer();
         return result;
     }
 
@@ -266,8 +287,7 @@ static dualcore_result_t run_dualcore_sequence(void)
                               load_acquire(&s_producer.forced_backpressure) == 1u &&
                               load_acquire(&s_producer.accepted) == FM6_PROGRAM_QUEUE_CAPACITY;
     if (!precondition) {
-        store_release(&s_producer.start, 1u);
-        (void)wait_flag(&s_producer.done);
+        cancel_producer();
         return result;
     }
 
@@ -322,6 +342,9 @@ static dualcore_result_t run_dualcore_sequence(void)
         ++committed;
     }
 
+    if (committed != DUALCORE_COMMANDS) {
+        cancel_producer();
+    }
     const bool producer_done = wait_flag(&s_producer.done);
     result.signature = signature;
     result.rejected = fm6_program_queue_rejected(&s_queue);
