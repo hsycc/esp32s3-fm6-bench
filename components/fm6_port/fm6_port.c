@@ -328,6 +328,13 @@ bool fm6_port_note_off(unsigned voice_index)
     return true;
 }
 
+void fm6_port_kill_all(void)
+{
+    memset(s_voice, 0, sizeof(s_voice));
+    memset(s_note_logfreq, 0, sizeof(s_note_logfreq));
+    s_last_sounded = 0u;
+}
+
 unsigned fm6_port_last_sounded(void)
 {
     return s_last_sounded;
@@ -424,19 +431,23 @@ bool fm6_port_note_off(unsigned voice_index)
     return false;
 }
 
+void fm6_port_kill_all(void)
+{
+}
+
 unsigned fm6_port_last_sounded(void)
 {
-    return 0;
+    return 0u;
 }
 
 uint32_t fm6_port_checksum(void)
 {
-    return 0;
+    return 0u;
 }
 
 uint64_t fm6_port_abs_energy(void)
 {
-    return 0;
+    return 0u;
 }
 
 #endif
