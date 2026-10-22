@@ -13,6 +13,7 @@ idf_component_register(
         "fm6_control_runtime_tests.c"
         "fm6_control_runtime_dualcore_tests.c"
         "fm6_midi_router_tests.c"
+        "fm6_performance_tests.c"
         "dx7_patch_tests.c"
         "dx7_import_tests.c"
         "dx7_import_stress_tests.c"

@@ -39,6 +39,7 @@ static volatile uint64_t s_abs_energy;
 static unsigned s_last_sounded;
 static unsigned s_prepared_voices;
 static uint8_t s_feedback;
+static int32_t s_pitch_bend_q24;
 
 static uint8_t clamp_u8(unsigned value, unsigned max_value)
 {
@@ -59,7 +60,6 @@ static int32_t patch_note_logfreq(uint8_t note)
 static void build_test_patch(const fm6_port_test_config_t *config)
 {
     memset(s_patch, 0, sizeof(s_patch));
-
     const uint8_t key_scale_depth = clamp_u8(config->key_scale_depth, 99u);
     const uint8_t rate_scaling = clamp_u8(config->rate_scaling, 7u);
     const uint8_t velocity_sensitivity = clamp_u8(config->velocity_sensitivity, 7u);
@@ -67,7 +67,6 @@ static void build_test_patch(const fm6_port_test_config_t *config)
 
     for (unsigned op_index = 0; op_index < 6u; ++op_index) {
         uint8_t *op = s_patch + op_index * FP_OP;
-
         if (config->dynamic_envelope) {
             op[FP_R1 + 0u] = 90;
             op[FP_R1 + 1u] = 65;
@@ -83,7 +82,6 @@ static void build_test_patch(const fm6_port_test_config_t *config)
                 op[FP_L1 + stage] = 99;
             }
         }
-
         op[FP_BP] = 50;
         op[FP_LD] = key_scale_depth;
         op[FP_RD] = key_scale_depth;
@@ -98,7 +96,6 @@ static void build_test_patch(const fm6_port_test_config_t *config)
         op[FP_FF] = (uint8_t)((25u + op_index * 11u) % 100u);
         op[FP_DET] = 7;
     }
-
     const uint8_t pitch_depth = clamp_u8(config->pitch_eg_depth, 49u);
     for (unsigned i = 0; i < 4u; ++i) {
         s_patch[FP_PR1 + i] = pitch_depth ? 90u : 99u;
@@ -110,7 +107,6 @@ static void build_test_patch(const fm6_port_test_config_t *config)
         s_patch[FP_PL1 + 2u] = (uint8_t)(50u + pitch_depth / 2u);
         s_patch[FP_PL1 + 3u] = 50u;
     }
-
     s_patch[FP_ALG] = clamp_u8(config->algorithm, 31u);
     s_patch[FP_FB] = clamp_u8(config->feedback, 7u);
     s_patch[FP_OKS] = 1;
@@ -129,30 +125,27 @@ static bool reset_runtime_state(unsigned voice_count)
     if (voice_count == 0u || voice_count > FM6_BENCH_MAX_VOICES) {
         return false;
     }
-
     memset(s_voice, 0, sizeof(s_voice));
     memset(s_note_logfreq, 0, sizeof(s_note_logfreq));
     memset(s_detune, 0, sizeof(s_detune));
     memset(&s_lfo, 0, sizeof(s_lfo));
     fm6_lfo_reset(&s_lfo, s_patch);
-
     s_prepared_voices = voice_count;
     s_feedback = s_patch[FP_FB] & 7u;
     s_checksum = 0;
     s_abs_energy = 0;
     s_last_sounded = 0;
+    s_pitch_bend_q24 = 0;
     return true;
 }
 
 static bool prepare_current_patch(unsigned voice_count,
-                                  uint8_t base_note,
-                                  uint8_t note_step,
+                                  uint8_t base_note, uint8_t note_step,
                                   uint8_t velocity)
 {
     if (!reset_runtime_state(voice_count)) {
         return false;
     }
-
     fm6_lfo_key(&s_lfo);
     for (unsigned v = 0; v < voice_count; ++v) {
         const uint8_t note = clamp_note((unsigned)base_note + v * (unsigned)note_step);
@@ -178,12 +171,9 @@ void fm6_port_prepare_test(const fm6_port_test_config_t *config)
     if (config == NULL) {
         return;
     }
-
     build_test_patch(config);
-    (void)prepare_current_patch(config->voice_count,
-                                config->base_note,
-                                config->note_step,
-                                config->velocity);
+    (void)prepare_current_patch(config->voice_count, config->base_note,
+                                config->note_step, config->velocity);
 }
 
 void fm6_port_prepare(unsigned voice_count, unsigned algorithm)
@@ -218,22 +208,18 @@ bool fm6_port_load_program(const uint8_t voice[FM6_RUNTIME_VOICE_SIZE],
     if (voice == NULL || voice_capacity == 0u || voice_capacity > FM6_BENCH_MAX_VOICES) {
         return false;
     }
-
     memcpy(s_patch, voice, FP_SIZE);
     s_patch[FP_SIZE] = 0;
     return reset_runtime_state(voice_capacity);
 }
 
 bool fm6_port_prepare_voice(const uint8_t voice[FM6_RUNTIME_VOICE_SIZE],
-                            unsigned voice_count,
-                            uint8_t base_note,
-                            uint8_t note_step,
-                            uint8_t velocity)
+                            unsigned voice_count, uint8_t base_note,
+                            uint8_t note_step, uint8_t velocity)
 {
     if (voice == NULL || voice_count == 0u || voice_count > FM6_BENCH_MAX_VOICES) {
         return false;
     }
-
     memcpy(s_patch, voice, FP_SIZE);
     s_patch[FP_SIZE] = 0;
     return prepare_current_patch(voice_count, base_note, note_step, velocity);
@@ -257,9 +243,7 @@ void fm6_port_render_block(unsigned voice_count, unsigned algorithm, int32_t *mi
     if (voice_count > FM6_BENCH_MAX_VOICES) {
         voice_count = FM6_BENCH_MAX_VOICES;
     }
-
     memset(mix_out, 0, sizeof(int32_t) * FM6_BENCH_BLOCK_FRAMES);
-
     const int32_t lfo_value = fm6_lfo_sample(&s_lfo);
     const int32_t lfo_delay = fm6_lfo_delay(&s_lfo);
     const uint32_t alg = algorithm & 31u;
@@ -267,28 +251,19 @@ void fm6_port_render_block(unsigned voice_count, unsigned algorithm, int32_t *mi
 
     for (unsigned v = 0; v < voice_count; ++v) {
         int32_t voice_out[FM6_BENCH_BLOCK_FRAMES] = {0};
-        const int sounded = fm6_note_compute(&s_voice[v],
-                                              s_patch,
-                                              voice_out,
-                                              lfo_value,
-                                              lfo_delay,
-                                              s_note_logfreq[v],
-                                              alg,
-                                              s_feedback,
-                                              s_detune,
-                                              0);
+        const int sounded = fm6_note_compute(&s_voice[v], s_patch, voice_out,
+                                              lfo_value, lfo_delay,
+                                              s_note_logfreq[v] + s_pitch_bend_q24,
+                                              alg, s_feedback, s_detune, 0);
         if (!sounded) {
             continue;
         }
-
         ++sounded_voices;
         for (unsigned i = 0; i < FM6_BENCH_BLOCK_FRAMES; ++i) {
             mix_out[i] += voice_out[i];
         }
     }
-
     s_last_sounded = sounded_voices;
-
     for (unsigned i = 0; i < FM6_BENCH_BLOCK_FRAMES; ++i) {
         const int64_t sample = mix_out[i];
         s_abs_energy += (uint64_t)(sample < 0 ? -sample : sample);
@@ -308,7 +283,6 @@ bool fm6_port_note_on(unsigned voice_index, uint8_t note, uint8_t velocity)
     if (voice_index >= s_prepared_voices) {
         return false;
     }
-
     note = clamp_note(note);
     velocity = clamp_u8(velocity, 127u);
     const int fresh = !s_voice[voice_index].live;
@@ -323,9 +297,24 @@ bool fm6_port_note_off(unsigned voice_index)
     if (voice_index >= s_prepared_voices) {
         return false;
     }
-
     fm6_note_key(&s_voice[voice_index], s_patch, 0);
     return true;
+}
+
+bool fm6_port_set_pitch_bend(uint16_t value)
+{
+    if (value > 16383u) {
+        return false;
+    }
+    /* log2(freq ratio) in Q24. No floating point, no note or envelope restart. */
+    const int64_t numerator = ((int32_t)value - 8192) * INT64_C(33554432);
+    s_pitch_bend_q24 = (int32_t)(numerator / 98304);
+    return true;
+}
+
+int32_t fm6_port_pitch_bend_offset_q24(void)
+{
+    return s_pitch_bend_q24;
 }
 
 void fm6_port_kill_all(void)
@@ -352,40 +341,23 @@ uint64_t fm6_port_abs_energy(void)
 
 #else
 
-bool fm6_port_available(void)
-{
-    return false;
-}
-
-const char *fm6_port_upstream_revision(void)
-{
-    return FELUCCA_REVISION;
-}
-
-void fm6_port_prepare_test(const fm6_port_test_config_t *config)
-{
-    (void)config;
-}
-
+bool fm6_port_available(void) { return false; }
+const char *fm6_port_upstream_revision(void) { return FELUCCA_REVISION; }
+void fm6_port_prepare_test(const fm6_port_test_config_t *config) { (void)config; }
 void fm6_port_prepare(unsigned voice_count, unsigned algorithm)
 {
     (void)voice_count;
     (void)algorithm;
 }
-
-bool fm6_port_load_program(const uint8_t voice[FM6_RUNTIME_VOICE_SIZE],
-                           unsigned voice_capacity)
+bool fm6_port_load_program(const uint8_t voice[FM6_RUNTIME_VOICE_SIZE], unsigned voice_capacity)
 {
     (void)voice;
     (void)voice_capacity;
     return false;
 }
-
 bool fm6_port_prepare_voice(const uint8_t voice[FM6_RUNTIME_VOICE_SIZE],
-                            unsigned voice_count,
-                            uint8_t base_note,
-                            uint8_t note_step,
-                            uint8_t velocity)
+                            unsigned voice_count, uint8_t base_note,
+                            uint8_t note_step, uint8_t velocity)
 {
     (void)voice;
     (void)voice_count;
@@ -394,29 +366,15 @@ bool fm6_port_prepare_voice(const uint8_t voice[FM6_RUNTIME_VOICE_SIZE],
     (void)velocity;
     return false;
 }
-
-unsigned fm6_port_voice_capacity(void)
-{
-    return 0u;
-}
-
-unsigned fm6_port_patch_algorithm(void)
-{
-    return 0u;
-}
-
+unsigned fm6_port_voice_capacity(void) { return 0u; }
+unsigned fm6_port_patch_algorithm(void) { return 0u; }
 void fm6_port_render_block(unsigned voice_count, unsigned algorithm, int32_t *mix_out)
 {
     (void)voice_count;
     (void)algorithm;
     memset(mix_out, 0, sizeof(int32_t) * FM6_BENCH_BLOCK_FRAMES);
 }
-
-void fm6_port_key_all(bool down)
-{
-    (void)down;
-}
-
+void fm6_port_key_all(bool down) { (void)down; }
 bool fm6_port_note_on(unsigned voice_index, uint8_t note, uint8_t velocity)
 {
     (void)voice_index;
@@ -424,30 +382,12 @@ bool fm6_port_note_on(unsigned voice_index, uint8_t note, uint8_t velocity)
     (void)velocity;
     return false;
 }
-
-bool fm6_port_note_off(unsigned voice_index)
-{
-    (void)voice_index;
-    return false;
-}
-
-void fm6_port_kill_all(void)
-{
-}
-
-unsigned fm6_port_last_sounded(void)
-{
-    return 0u;
-}
-
-uint32_t fm6_port_checksum(void)
-{
-    return 0u;
-}
-
-uint64_t fm6_port_abs_energy(void)
-{
-    return 0u;
-}
+bool fm6_port_note_off(unsigned voice_index) { (void)voice_index; return false; }
+bool fm6_port_set_pitch_bend(uint16_t value) { (void)value; return false; }
+int32_t fm6_port_pitch_bend_offset_q24(void) { return 0; }
+void fm6_port_kill_all(void) { }
+unsigned fm6_port_last_sounded(void) { return 0u; }
+uint32_t fm6_port_checksum(void) { return 0u; }
+uint64_t fm6_port_abs_energy(void) { return 0u; }
 
 #endif

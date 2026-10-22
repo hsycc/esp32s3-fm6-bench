@@ -41,11 +41,9 @@ jobs:
           source /opt/esp/idf/export.sh
           set -euo pipefail
           : > qemu.log
-
           setsid idf.py qemu > qemu.log 2>&1 &
           qpid=$!
           complete=0
-
           for _ in $(seq 1 180); do
             if grep -q "=== benchmark complete ===" qemu.log; then
               complete=1
@@ -56,17 +54,13 @@ jobs:
             fi
             sleep 1
           done
-
           kill -TERM -- "-$qpid" 2>/dev/null || true
           wait "$qpid" 2>/dev/null || true
-
           cat qemu.log
-
           if [[ "$complete" != "1" ]]; then
             echo "QEMU benchmark did not complete within the validation window"
             exit 1
           fi
-
           python3 tools/check_dx7_layout_log.py qemu.log
           python3 tools/check_dx7_patch_log.py qemu.log
           python3 tools/check_dx7_import_log.py qemu.log
@@ -78,6 +72,7 @@ jobs:
           python3 tools/check_fm6_note_runtime_log.py qemu.log
           python3 tools/check_fm6_control_runtime_log.py qemu.log
           python3 tools/check_fm6_midi_router_log.py qemu.log
+          python3 tools/check_fm6_performance_log.py qemu.log
           python3 tools/check_qemu_log.py qemu.log
 
       - name: Publish QEMU summary
@@ -89,7 +84,7 @@ jobs:
             echo 'QEMU is the primary project gate. Timing below is emulator-only and is used for version-to-version regression, not as physical ESP32-S3 performance.'
             echo
             echo '```text'
-            grep -E 'QEMU_DX7_LAYOUT|DX7_LAYOUT_LOG_CHECK|QEMU_DX7_PATCH|QEMU_DX7_BANK_RENDER|DX7_PATCH_LOG_CHECK|DX7_PATCH_RENDER|QEMU_DX7_IMPORT|DX7_IMPORT_LOG_CHECK|DX7_IMPORT_RENDER|DX7_IMPORT_STRESS|DX7_IMPORT_FUZZ|QEMU_FM6_PROGRAM_QUEUE|FM6_PROGRAM_QUEUE_SWITCH|FM6_PROGRAM_QUEUE_LOG_CHECK|QEMU_FM6_PROGRAM_QUEUE_DUALCORE|FM6_PROGRAM_QUEUE_DUALCORE|FM6_PROGRAM_QUEUE_DUALCORE_LOG_CHECK|QEMU_FM6_PROGRAM_QUEUE_WRAP|FM6_PROGRAM_QUEUE_WRAP_RESULT|FM6_PROGRAM_QUEUE_WRAP_LOG_CHECK|QEMU_FM6_AUDIO_RUNTIME|FM6_AUDIO_RUNTIME_SEQUENCE|FM6_AUDIO_RUNTIME_LOG_CHECK|QEMU_FM6_NOTE_RUNTIME|FM6_NOTE_RUNTIME_SEQUENCE|FM6_NOTE_RUNTIME_LOG_CHECK|QEMU_FM6_CONTROL_RUNTIME|FM6_CONTROL_RUNTIME_SEQUENCE|FM6_CONTROL_RUNTIME_DUALCORE|FM6_CONTROL_RUNTIME_LOG_CHECK|QEMU_FM6_MIDI_ROUTER|FM6_MIDI_SEQUENCE|FM6_MIDI_ROUTER_LOG_CHECK|worst scan result:|QEMU_DETERMINISM|QEMU_FEATURE_MATRIX|QEMU_SOAK|QEMU_EVENT_STRESS|QEMU_RESULT|QEMU_VALIDATION|QEMU_LOG_CHECK' qemu.log || true
+            grep -E 'QEMU_DX7_LAYOUT|DX7_LAYOUT_LOG_CHECK|QEMU_DX7_PATCH|QEMU_DX7_BANK_RENDER|DX7_PATCH_LOG_CHECK|DX7_PATCH_RENDER|QEMU_DX7_IMPORT|DX7_IMPORT_LOG_CHECK|DX7_IMPORT_RENDER|DX7_IMPORT_STRESS|DX7_IMPORT_FUZZ|QEMU_FM6_PROGRAM_QUEUE|FM6_PROGRAM_QUEUE_SWITCH|FM6_PROGRAM_QUEUE_LOG_CHECK|QEMU_FM6_PROGRAM_QUEUE_DUALCORE|FM6_PROGRAM_QUEUE_DUALCORE|FM6_PROGRAM_QUEUE_DUALCORE_LOG_CHECK|QEMU_FM6_PROGRAM_QUEUE_WRAP|FM6_PROGRAM_QUEUE_WRAP_RESULT|FM6_PROGRAM_QUEUE_WRAP_LOG_CHECK|QEMU_FM6_AUDIO_RUNTIME|FM6_AUDIO_RUNTIME_SEQUENCE|FM6_AUDIO_RUNTIME_LOG_CHECK|QEMU_FM6_NOTE_RUNTIME|FM6_NOTE_RUNTIME_SEQUENCE|FM6_NOTE_RUNTIME_LOG_CHECK|QEMU_FM6_CONTROL_RUNTIME|FM6_CONTROL_RUNTIME_SEQUENCE|FM6_CONTROL_RUNTIME_DUALCORE|FM6_CONTROL_RUNTIME_LOG_CHECK|QEMU_FM6_MIDI_ROUTER|FM6_MIDI_SEQUENCE|FM6_MIDI_ROUTER_LOG_CHECK|FM6_PERFORMANCE|FM6_BEND_AUDIO|worst scan result:|QEMU_DETERMINISM|QEMU_FEATURE_MATRIX|QEMU_SOAK|QEMU_EVENT_STRESS|QEMU_RESULT|QEMU_VALIDATION|QEMU_LOG_CHECK' qemu.log || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
