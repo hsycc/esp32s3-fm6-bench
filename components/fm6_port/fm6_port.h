@@ -32,16 +32,15 @@ typedef struct {
 
 bool fm6_port_available(void);
 const char *fm6_port_upstream_revision(void);
-
 void fm6_port_prepare(unsigned voice_count, unsigned algorithm);
 void fm6_port_prepare_test(const fm6_port_test_config_t *config);
 
+/* Benchmark helper pre-fills voices. Product load_program starts silent. */
 bool fm6_port_prepare_voice(const uint8_t voice[FM6_RUNTIME_VOICE_SIZE],
                             unsigned voice_count,
                             uint8_t base_note,
                             uint8_t note_step,
                             uint8_t velocity);
-
 bool fm6_port_load_program(const uint8_t voice[FM6_RUNTIME_VOICE_SIZE],
                            unsigned voice_capacity);
 
@@ -52,10 +51,17 @@ void fm6_port_key_all(bool down);
 bool fm6_port_note_on(unsigned voice_index, uint8_t note, uint8_t velocity);
 bool fm6_port_note_off(unsigned voice_index);
 
-/* Hard-kill all active/release-tail voices without changing the current patch or
- * reserved voice capacity. Used by MIDI CC120 All Sound Off. */
-void fm6_port_kill_all(void);
+/* Audio-owner-only controls. 14-bit bend uses +/-2 semitones, no EG/phase reset.
+ * It offsets ratio operators; the upstream fixed-frequency operators stay fixed.
+ * Loading/preparing a program resets bend to center; control_runtime restores it.
+ * 16383 is one wheel step short of the mathematical +2-semitone endpoint. */
+bool fm6_port_set_pitch_bend(uint16_t value);
+int32_t fm6_port_pitch_bend_offset_q24(void);
 
+/* CC120: hard-kill voices without changing patch, bend or reserved capacity. */
+void fm6_port_kill_all(void);
 unsigned fm6_port_last_sounded(void);
+/* Raw engine diagnostics, BEFORE control_runtime's volume/expression gain.
+ * Output-chain tests must hash the returned runtime PCM, not these counters. */
 uint32_t fm6_port_checksum(void);
 uint64_t fm6_port_abs_energy(void);
