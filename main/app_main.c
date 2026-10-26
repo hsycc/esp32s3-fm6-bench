@@ -15,6 +15,7 @@
 #include "fm6_control_runtime_tests.h"
 #include "fm6_midi_router_tests.h"
 #include "fm6_performance_tests.h"
+#include "fm6_pcm_output_tests.h"
 #include "fm6_note_runtime_tests.h"
 #include "fm6_program_queue_dualcore_tests.h"
 #include "fm6_program_queue_tests.h"
@@ -67,6 +68,9 @@ static void bench_task(void *arg)
     const unsigned fm6_performance_failures = fm6_performance_tests_run();
     printf("QEMU_FM6_PERFORMANCE_GATE: %s failures=%u\n",
            fm6_performance_failures == 0u ? "PASS" : "FAIL", fm6_performance_failures);
+    const unsigned fm6_pcm_failures = fm6_pcm_output_tests_run();
+    printf("QEMU_FM6_PCM_GATE: %s failures=%u\n",
+           fm6_pcm_failures == 0u ? "PASS" : "FAIL", fm6_pcm_failures);
 #endif
     fm6_bench_run();
     vTaskDelete(NULL);
