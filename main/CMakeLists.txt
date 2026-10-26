@@ -14,12 +14,13 @@ idf_component_register(
         "fm6_control_runtime_dualcore_tests.c"
         "fm6_midi_router_tests.c"
         "fm6_performance_tests.c"
+        "fm6_pcm_output_tests.c"
         "dx7_patch_tests.c"
         "dx7_import_tests.c"
         "dx7_import_stress_tests.c"
         "dx7_layout_tests.c"
     INCLUDE_DIRS "."
-    REQUIRES fm6_port fm6_program_queue fm6_audio_runtime fm6_note_runtime fm6_control_runtime fm6_program_bank fm6_midi_router dx7_patch esp_hw_support
+    REQUIRES fm6_port fm6_program_queue fm6_audio_runtime fm6_note_runtime fm6_control_runtime fm6_program_bank fm6_midi_router fm6_pcm_output dx7_patch esp_hw_support
 )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -O2)

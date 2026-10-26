@@ -1,4 +1,5 @@
 #include "fm6_port.h"
+#include "fm6_mix.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -37,6 +38,7 @@ static int32_t s_detune[6];
 static volatile uint32_t s_checksum;
 static volatile uint64_t s_abs_energy;
 static unsigned s_last_sounded;
+static unsigned s_last_mix_saturated;
 static unsigned s_prepared_voices;
 static uint8_t s_feedback;
 static int32_t s_pitch_bend_q24;
@@ -135,6 +137,7 @@ static bool reset_runtime_state(unsigned voice_count)
     s_checksum = 0;
     s_abs_energy = 0;
     s_last_sounded = 0;
+    s_last_mix_saturated = 0;
     s_pitch_bend_q24 = 0;
     return true;
 }
@@ -243,7 +246,7 @@ void fm6_port_render_block(unsigned voice_count, unsigned algorithm, int32_t *mi
     if (voice_count > FM6_BENCH_MAX_VOICES) {
         voice_count = FM6_BENCH_MAX_VOICES;
     }
-    memset(mix_out, 0, sizeof(int32_t) * FM6_BENCH_BLOCK_FRAMES);
+    int64_t mix[FM6_BENCH_BLOCK_FRAMES] = {0};
     const int32_t lfo_value = fm6_lfo_sample(&s_lfo);
     const int32_t lfo_delay = fm6_lfo_delay(&s_lfo);
     const uint32_t alg = algorithm & 31u;
@@ -259,12 +262,14 @@ void fm6_port_render_block(unsigned voice_count, unsigned algorithm, int32_t *mi
             continue;
         }
         ++sounded_voices;
-        for (unsigned i = 0; i < FM6_BENCH_BLOCK_FRAMES; ++i) {
-            mix_out[i] += voice_out[i];
-        }
+        fm6_mix_add(mix, voice_out);
     }
     s_last_sounded = sounded_voices;
+    s_last_mix_saturated = 0u;
     for (unsigned i = 0; i < FM6_BENCH_BLOCK_FRAMES; ++i) {
+        bool saturated = false;
+        mix_out[i] = fm6_mix_narrow(mix[i], &saturated);
+        s_last_mix_saturated += saturated;
         const int64_t sample = mix_out[i];
         s_abs_energy += (uint64_t)(sample < 0 ? -sample : sample);
         s_checksum = (s_checksum * 16777619u) ^ (uint32_t)mix_out[i];
@@ -322,11 +327,17 @@ void fm6_port_kill_all(void)
     memset(s_voice, 0, sizeof(s_voice));
     memset(s_note_logfreq, 0, sizeof(s_note_logfreq));
     s_last_sounded = 0u;
+    s_last_mix_saturated = 0u;
 }
 
 unsigned fm6_port_last_sounded(void)
 {
     return s_last_sounded;
+}
+
+unsigned fm6_port_last_mix_saturated(void)
+{
+    return s_last_mix_saturated;
 }
 
 uint32_t fm6_port_checksum(void)
@@ -387,6 +398,7 @@ bool fm6_port_set_pitch_bend(uint16_t value) { (void)value; return false; }
 int32_t fm6_port_pitch_bend_offset_q24(void) { return 0; }
 void fm6_port_kill_all(void) { }
 unsigned fm6_port_last_sounded(void) { return 0u; }
+unsigned fm6_port_last_mix_saturated(void) { return 0u; }
 uint32_t fm6_port_checksum(void) { return 0u; }
 uint64_t fm6_port_abs_energy(void) { return 0u; }
 

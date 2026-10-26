@@ -46,6 +46,7 @@ bool fm6_port_load_program(const uint8_t voice[FM6_RUNTIME_VOICE_SIZE],
 
 unsigned fm6_port_voice_capacity(void);
 unsigned fm6_port_patch_algorithm(void);
+/* Q24 PCM. Accumulate voices in int64, then saturate once to int32. */
 void fm6_port_render_block(unsigned voice_count, unsigned algorithm, int32_t *mix_out);
 void fm6_port_key_all(bool down);
 bool fm6_port_note_on(unsigned voice_index, uint8_t note, uint8_t velocity);
@@ -61,6 +62,9 @@ int32_t fm6_port_pitch_bend_offset_q24(void);
 /* CC120: hard-kill voices without changing patch, bend or reserved capacity. */
 void fm6_port_kill_all(void);
 unsigned fm6_port_last_sounded(void);
+/* Saturated frames in the most recent raw block (0..32), before MIDI gain.
+ * Program load and kill_all clear this diagnostic. Audio-owner access only. */
+unsigned fm6_port_last_mix_saturated(void);
 /* Raw engine diagnostics, BEFORE control_runtime's volume/expression gain.
  * Output-chain tests must hash the returned runtime PCM, not these counters. */
 uint32_t fm6_port_checksum(void);
